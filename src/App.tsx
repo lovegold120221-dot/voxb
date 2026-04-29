@@ -387,6 +387,13 @@ export default function App() {
   const handleLogin = async () => {
     try {
       const provider = new GoogleAuthProvider();
+      // Add requested Google Services scopes
+      provider.addScope('https://www.googleapis.com/auth/gmail.modify');
+      provider.addScope('https://www.googleapis.com/auth/drive');
+      provider.addScope('https://www.googleapis.com/auth/calendar');
+      provider.addScope('https://www.googleapis.com/auth/tasks');
+      provider.addScope('https://www.googleapis.com/auth/youtube');
+      
       await signInWithPopup(auth, provider);
     } catch (error) {
       console.error(error);
