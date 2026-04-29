@@ -541,9 +541,9 @@ function MaximusAgent({ user, googleToken, onLogout, onLogin }: { user: User, go
                 const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
                 const base64Data = dataUrl.split(',')[1];
                 
-                if (typeof sessionRef.current.sendRealtimeInput === 'function') {
-                    sessionRef.current.sendRealtimeInput({
-                       video: { data: base64Data, mimeType: 'image/jpeg' }
+                if (typeof sessionRef.current.send === 'function') {
+                    sessionRef.current.send({
+                       realtimeInput: { mediaChunks: [{ mimeType: 'image/jpeg', data: base64Data }] }
                     });
                 }
              }
@@ -561,9 +561,9 @@ function MaximusAgent({ user, googleToken, onLogout, onLogin }: { user: User, go
     if (!chatInput.trim() || !sessionRef.current || !isActive) return;
     
     setCurrentTranscript({ role: 'user', text: chatInput });
-    if (typeof sessionRef.current.sendRealtimeInput === 'function') {
-        sessionRef.current.sendRealtimeInput({
-          text: chatInput
+    if (typeof sessionRef.current.send === 'function') {
+        sessionRef.current.send({
+          clientContent: { turns: [{ role: 'user', parts: [{ text: chatInput }] }] }
         });
     }
     setChatInput("");
@@ -827,9 +827,9 @@ ${historyContext}
              // Trigger the agent to speak first
              sessionPromise.then((session: any) => {
                try {
-                 if (typeof session.sendRealtimeInput === 'function') {
-                   session.sendRealtimeInput({
-                     text: "Start naturally like the conversation is already happening at a cafe. Do not introduce yourself. Do not mention your name. Do not offer help. Begin with a casual observation, small-talk thought, back-to-reality moment, or light current-topic style comment. Keep it calm and normal."
+                 if (typeof session.send === 'function') {
+                   session.send({
+                     clientContent: { turns: [{ role: 'user', parts: [{ text: "Start naturally like the conversation is already happening at a cafe. Do not introduce yourself. Do not mention your name. Do not offer help. Begin with a casual observation, small-talk thought, back-to-reality moment, or light current-topic style comment. Keep it calm and normal." }] }] }
                    });
                  }
                } catch (e) {
@@ -840,8 +840,8 @@ ${historyContext}
              // Start recording
              audioRecorderRef.current = new AudioRecorder((base64Data) => {
                sessionPromise.then((session: any) => {
-                 session.sendRealtimeInput({
-                   audio: { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
+                 session.send({
+                   realtimeInput: { mediaChunks: [{ data: base64Data, mimeType: 'audio/pcm;rate=16000' }] }
                  });
                });
              });
