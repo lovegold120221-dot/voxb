@@ -4,7 +4,7 @@ import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut 
 import { doc, getDoc, setDoc, serverTimestamp, collection, query, orderBy, limit, onSnapshot, Timestamp } from 'firebase/firestore';
 import { GoogleGenAI, LiveServerMessage, Modality, Type } from '@google/genai';
 import { AudioRecorder, AudioStreamer } from './lib/audio';
-import { Square, Loader2, Power, LogOut, Volume2, Command, Check, Settings, X, Save, Activity } from 'lucide-react';
+import { Square, Loader2, Power, LogOut, Volume2, Command, Check, Settings, X, Save, Activity, Video, MessageSquare, Mic, MicOff, Camera } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
 interface ChatMessage {
@@ -490,14 +490,83 @@ export default function App() {
     );
   }
 
-  return <MaximusAgent user={user} googleToken={googleToken} onLogout={handleLogout} />;
+  return <MaximusAgent user={user} googleToken={googleToken} onLogout={handleLogout} onLogin={handleLogin} />;
 }
 
-function MaximusAgent({ user, googleToken, onLogout }: { user: User, googleToken: string | null, onLogout: () => void }) {
+function MaximusAgent({ user, googleToken, onLogout, onLogin }: { user: User, googleToken: string | null, onLogout: () => void, onLogin: () => void }) {
   const [isActive, setIsActive] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
   const [volumes, setVolumes] = useState<number[]>(Array(11).fill(0.05));
+
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const videoStreamRef = useRef<MediaStream | null>(null);
+  const videoIntervalRef = useRef<any>(null);
+
+  const toggleCamera = async () => {
+    if (isCameraActive) {
+      if (videoStreamRef.current) {
+        videoStreamRef.current.getTracks().forEach(t => t.stop());
+        videoStreamRef.current = null;
+      }
+      if (videoIntervalRef.current) {
+        clearInterval(videoIntervalRef.current);
+        videoIntervalRef.current = null;
+      }
+      setIsCameraActive(false);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 640, height: 480 } });
+        videoStreamRef.current = stream;
+        if (videoRef.current) {
+           videoRef.current.srcObject = stream;
+        }
+        setIsCameraActive(true);
+
+        videoIntervalRef.current = setInterval(() => {
+          if (!sessionRef.current || !videoRef.current || !canvasRef.current || !isActive) return;
+          const video = videoRef.current;
+          const canvas = canvasRef.current;
+          if (video.videoWidth > 0 && video.videoHeight > 0) {
+             canvas.width = video.videoWidth;
+             canvas.height = video.videoHeight;
+             const ctx = canvas.getContext('2d');
+             if (ctx) {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+                const base64Data = dataUrl.split(',')[1];
+                
+                if (typeof sessionRef.current.sendRealtimeInput === 'function') {
+                    sessionRef.current.sendRealtimeInput({
+                       video: { data: base64Data, mimeType: 'image/jpeg' }
+                    });
+                }
+             }
+          }
+        }, 1000);
+
+      } catch (err) {
+        console.error("Camera error:", err);
+      }
+    }
+  };
+
+  const handleSendChat = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim() || !sessionRef.current || !isActive) return;
+    
+    setCurrentTranscript({ role: 'user', text: chatInput });
+    if (typeof sessionRef.current.sendRealtimeInput === 'function') {
+        sessionRef.current.sendRealtimeInput({
+          text: chatInput
+        });
+    }
+    setChatInput("");
+  };
 
   useEffect(() => {
     let animationFrame: number;
@@ -1094,30 +1163,115 @@ ${historyContext}
            </div>
 
            {/* Controls */}
-           <div className="flex flex-col items-center gap-6 mt-8">
-              {!isActive ? (
-                <button 
-                  onClick={startSession}
-                  disabled={connecting}
-                  className="w-16 h-16 bg-gradient-to-br from-amber-500 to-amber-700 p-[1px] rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100 shadow-[0_0_20px_rgba(245,158,11,0.2)]"
-                >
-                  <div className="w-full h-full rounded-full bg-[#0A0A0B] flex items-center justify-center">
-                    <Power className="w-6 h-6 text-amber-500" />
-                  </div>
-                </button>
-              ) : (
-                <button 
-                  onClick={stopSession}
-                  className="w-16 h-16 bg-red-500/10 border border-red-500/30 text-red-500 rounded-full flex items-center justify-center hover:bg-red-500/20 hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(239,68,68,0.2)]"
-                >
-                  <Square className="w-6 h-6 fill-current" />
-                </button>
-              )}
+           <div className="flex flex-col items-center gap-6 mt-8 z-40 relative">
+              <div className="flex items-center gap-4">
+                {/* Chat Button (only visible when active) */}
+                <AnimatePresence>
+                  {isActive && (
+                    <motion.button
+                      initial={{ scale: 0, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0, opacity: 0 }}
+                      onClick={() => setIsChatOpen(!isChatOpen)}
+                      className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg border ${
+                        isChatOpen 
+                          ? 'bg-amber-500 text-black border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.5)]' 
+                          : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
+                      }`}
+                    >
+                      <MessageSquare className="w-5 h-5" />
+                    </motion.button>
+                  )}
+                </AnimatePresence>
+
+                {/* Main Action Button */}
+                {!isActive ? (
+                  <button 
+                    onClick={startSession}
+                    disabled={connecting}
+                    className="w-16 h-16 bg-gradient-to-br from-amber-500 to-amber-700 p-[1px] rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100 shadow-[0_0_20px_rgba(245,158,11,0.2)] relative z-50"
+                  >
+                    <div className="w-full h-full rounded-full bg-[#0A0A0B] flex items-center justify-center">
+                      <Power className="w-6 h-6 text-amber-500" />
+                    </div>
+                  </button>
+                ) : (
+                  <button 
+                    onClick={stopSession}
+                    className="w-16 h-16 bg-red-500/10 border border-red-500/30 text-red-500 rounded-full flex items-center justify-center hover:bg-red-500/20 hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(239,68,68,0.2)] relative z-50"
+                  >
+                    <Square className="w-6 h-6 fill-current" />
+                  </button>
+                )}
+
+                {/* Camera Button (only visible when active) */}
+                <AnimatePresence>
+                  {isActive && (
+                     <motion.button
+                       initial={{ scale: 0, opacity: 0 }}
+                       animate={{ scale: 1, opacity: 1 }}
+                       exit={{ scale: 0, opacity: 0 }}
+                       onClick={toggleCamera}
+                       className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg border ${
+                          isCameraActive 
+                            ? 'bg-emerald-500 text-black border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)]' 
+                            : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
+                       }`}
+                     >
+                       <Video className="w-5 h-5" />
+                     </motion.button>
+                  )}
+                </AnimatePresence>
+              </div>
               
               <p className="text-[10px] font-bold tracking-widest text-gray-500 uppercase">
                 {isActive ? 'Active Session' : 'Tap to initialize'}
               </p>
+
+              {/* Chat Input Overlay */}
+              <AnimatePresence>
+                {isActive && isChatOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="absolute top-24 w-72 bg-[#0A0A0B]/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 shadow-2xl"
+                  >
+                    <form onSubmit={handleSendChat} className="flex gap-2">
+                       <input 
+                         type="text" 
+                         value={chatInput}
+                         autoFocus
+                         onChange={(e) => setChatInput(e.target.value)}
+                         placeholder="Type a message..."
+                         className="flex-1 bg-white/5 text-sm text-white px-3 py-2 rounded-xl border border-white/10 focus:outline-none focus:border-amber-500/50"
+                       />
+                       <button type="submit" className="p-2 bg-amber-500 text-black rounded-xl hover:bg-amber-400 transition-colors hidden sm:block">
+                          <Check className="w-4 h-4" />
+                       </button>
+                    </form>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Video capture elements */}
+              <canvas ref={canvasRef} className="hidden" />
            </div>
+           
+           {/* Floating Video Preview */}
+           <AnimatePresence>
+             {isCameraActive && (
+                <motion.div
+                   initial={{ opacity: 0, scale: 0.8, y: 20 }}
+                   animate={{ opacity: 1, scale: 1, y: 0 }}
+                   exit={{ opacity: 0, scale: 0.8, y: 20 }}
+                   className="absolute bottom-32 right-8 w-24 h-32 rounded-2xl overflow-hidden border border-white/10 shadow-2xl z-40 bg-black"
+                >
+                  <video ref={videoRef} className="w-full h-full object-cover transform -scale-x-100" autoPlay playsInline muted />
+                  <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+                </motion.div>
+             )}
+           </AnimatePresence>
            
            {/* Background Tasks */}
            <div className="absolute bottom-6 left-0 right-0 px-8">
@@ -1232,7 +1386,7 @@ ${historyContext}
                               </div>
                             </div>
                             <button 
-                              onClick={handleLogin}
+                              onClick={onLogin}
                               className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all"
                             >
                               {googleToken ? 'Sync permissions' : 'Connect'}
