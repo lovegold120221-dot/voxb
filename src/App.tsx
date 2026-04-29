@@ -405,6 +405,12 @@ export default function App() {
       provider.addScope('https://www.googleapis.com/auth/tasks');
       provider.addScope('https://www.googleapis.com/auth/youtube');
       
+      // Force the consent screen so the user sees the scope requests
+      provider.setCustomParameters({
+        prompt: 'consent',
+        access_type: 'offline'
+      });
+      
       const result = await signInWithPopup(auth, provider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (credential?.accessToken) {
@@ -637,10 +643,7 @@ function MaximusAgent({ user, googleToken, onLogout }: { user: User, googleToken
     }
 
     if (!googleToken) {
-      const confirmAuth = window.confirm("To use Google Services (Gmail, Calendar, etc.), I need you to quickly re-authenticate. Ready?");
-      if (!confirmAuth) return;
-      onLogout(); // Force logout to trigger re-login flow
-      return;
+       console.warn("Google token missing. Google services will be disabled until you re-authenticate.");
     }
     
     setConnecting(true);
@@ -719,7 +722,7 @@ ${historyContext}
       await audioStreamerRef.current?.init(24000);
       
       const sessionPromise = aiRef.current.live.connect({
-        model: "models/gemini-2.0-flash-exp",
+        model: "models/gemini-2.0-flash",
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
@@ -1217,6 +1220,31 @@ ${historyContext}
                     </div>
 
                     <div className="p-8 space-y-6 overflow-y-auto max-h-[70vh]">
+                       <div className="p-5 bg-white/5 border border-white/10 rounded-[24px] space-y-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex flex-col">
+                              <span className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-1">Google Integration</span>
+                              <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${googleToken ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]'}`} />
+                                <span className={`text-xs font-mono uppercase tracking-widest ${googleToken ? 'text-emerald-500' : 'text-amber-500'}`}>
+                                  {googleToken ? 'Authenticated' : 'Connection Required'}
+                                </span>
+                              </div>
+                            </div>
+                            <button 
+                              onClick={handleLogin}
+                              className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all"
+                            >
+                              {googleToken ? 'Sync permissions' : 'Connect'}
+                            </button>
+                          </div>
+                          {!googleToken && (
+                            <p className="text-[10px] text-gray-500 leading-relaxed uppercase tracking-tighter">
+                              Connect to enable Gmail, Calendar, Drive, and real-time task management capabilities.
+                            </p>
+                          )}
+                       </div>
+
                        <div className="space-y-2">
                           <label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold ml-1">Persona Name</label>
                           <input 
