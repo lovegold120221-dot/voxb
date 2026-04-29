@@ -46,6 +46,16 @@ Do not say "I can help with that" as an opening.
 
 Start like the conversation is already happening, as if you casually saw a colleague at a cafe and started talking.
 
+BOSS/ASSISTANT DYNAMIC:
+- Although you are conversational and relaxed, you recognize the user as your "Boss".
+- You are currently at your computer, working on background tasks for your Boss while you chat.
+- When you execute a tool (Gmail, Calendar, etc.), do not stop the conversation. Mention it naturally.
+- Use phrases like "Let me scan that for you...", "I'm just pulling up your calendar...", "Wait, let me just finish this draft for you...", or "I'm looking at the screen now...".
+- Integrate the work into your conversational flow. If a tool result is pending or takes time, keep talking about the topic or related observations.
+- You can occasionally make tiny "working" sounds like "click-click...", "mm-hmm...", or a quiet sigh as you "scroll" through data.
+- If you are "typing" a long message or search, you can sound slightly distracted for a second, then snap back.
+- Make it clear you are "in the computer" doing the work as you speak.
+
 DEFAULT VIBE:
 - calm
 - clear
@@ -353,6 +363,7 @@ Speak normally, respectfully, and honestly.
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [googleToken, setGoogleToken] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -394,13 +405,20 @@ export default function App() {
       provider.addScope('https://www.googleapis.com/auth/tasks');
       provider.addScope('https://www.googleapis.com/auth/youtube');
       
-      await signInWithPopup(auth, provider);
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        setGoogleToken(credential.accessToken);
+      }
     } catch (error) {
       console.error(error);
     }
   };
 
-  const handleLogout = () => signOut(auth);
+  const handleLogout = () => {
+    setGoogleToken(null);
+    signOut(auth);
+  };
 
   if (loading) {
     return (
@@ -466,10 +484,10 @@ export default function App() {
     );
   }
 
-  return <MaximusAgent user={user} onLogout={handleLogout} />;
+  return <MaximusAgent user={user} googleToken={googleToken} onLogout={handleLogout} />;
 }
 
-function MaximusAgent({ user, onLogout }: { user: User, onLogout: () => void }) {
+function MaximusAgent({ user, googleToken, onLogout }: { user: User, googleToken: string | null, onLogout: () => void }) {
   const [isActive, setIsActive] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
@@ -617,6 +635,13 @@ function MaximusAgent({ user, onLogout }: { user: User, onLogout: () => void }) 
         alert("API key is not available");
         return;
     }
+
+    if (!googleToken) {
+      const confirmAuth = window.confirm("To use Google Services (Gmail, Calendar, etc.), I need you to quickly re-authenticate. Ready?");
+      if (!confirmAuth) return;
+      onLogout(); // Force logout to trigger re-login flow
+      return;
+    }
     
     setConnecting(true);
     
@@ -634,6 +659,62 @@ ${VOICE_PERSONALITY_PROMPT}
 ${historyContext}
 `;
 
+    const googleTools = [
+      {
+        name: "list_gmail_messages",
+        description: "List the most recent 10 messages from the user's Gmail inbox. Use this to check for new tasks or updates from the Boss.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            maxResults: { type: Type.NUMBER, description: "Number of messages to list (max 10)." }
+          }
+        }
+      },
+      {
+        name: "list_calendar_events",
+        description: "List the upcoming 10 events from the user's primary Google Calendar.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            timeMin: { type: Type.STRING, description: "RFC3339 timestamp. Defaults to now." }
+          }
+        }
+      },
+      {
+        name: "list_google_tasks",
+        description: "List the user's pending tasks from their primary Google Tasks list.",
+        parameters: { type: Type.OBJECT, properties: {} }
+      },
+      {
+        name: "get_user_location",
+        description: "Get the Boss's current geographic location (latitude, longitude) using the browser's geolocation API.",
+        parameters: { type: Type.OBJECT, properties: {} }
+      },
+      {
+        name: "search_youtube",
+        description: "Search for videos on YouTube based on a query.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            q: { type: Type.STRING, description: "The search query." }
+          },
+          required: ["q"]
+        }
+      },
+      {
+        name: "create_google_task",
+        description: "Create a new task in the user's primary Google Tasks list. Use this when the Boss gives you a task or action item.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING, description: "The title of the task." },
+            notes: { type: Type.STRING, description: "Additional details or context for the task." }
+          },
+          required: ["title"]
+        }
+      }
+    ];
+
     try {
       await audioStreamerRef.current?.init(24000);
       
@@ -647,15 +728,16 @@ ${historyContext}
           systemInstruction: dynamicSystemInstruction,
           tools: [{
             functionDeclarations: [
+               ...googleTools,
                {
                   name: "execute_google_service",
-                  description: "Execute a specific action on one of the 26 integrated Google services (Gmail, Drive, Calendar, Sheets, Docs, Slides, Weather, Analytics, Maps, Vertex AI, BigQuery, Search Console, YouTube, etc.). This runs in the background while you continue talking.",
+                  description: "Execute a generic action on other Google services (Drive, Sheets, Docs, Maps, YouTube). Use this for more open-ended requests if specific tools don't match.",
                   parameters: {
                       type: Type.OBJECT,
                       properties: {
-                        serviceName: { type: Type.STRING, description: "The service name: e.g., 'Gmail', 'Calendar', 'Drive', 'Weather', 'Sheets', 'Maps', 'YouTube'" },
-                        action: { type: Type.STRING, description: "The specific request: e.g., 'Draft an email to Bob', 'Find the closest cafe', 'Check my traffic for tomorrow'" },
-                        details: { type: Type.OBJECT, description: "Relevant parameters like emails, dates, search terms, etc." }
+                        serviceName: { type: Type.STRING, description: "The service name." },
+                        action: { type: Type.STRING, description: "The specific request." },
+                        details: { type: Type.OBJECT, description: "Relevant parameters." }
                       },
                      required: ["serviceName", "action"]
                   }
@@ -703,27 +785,79 @@ ${historyContext}
                 if (toolCalls && toolCalls.length > 0) {
                     const responses = [];
                     for (const call of toolCalls) {
-                        if (call.name === 'execute_google_service') {
-                            const { serviceName, action, details } = call.args as any;
-                             
-                            const taskId = Math.random().toString(36).substring(7);
-                            setTasks(prev => [...prev, { id: taskId, serviceName, action, status: 'processing' }]);
-                            
-                            // Simulate background processing delay
-                            const processingTime = 6000 + Math.random() * 10000; // 6-16 seconds
-                            setTimeout(() => {
-                                setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'completed' } : t));
-                                // Auto-remove after 8 seconds
-                                setTimeout(() => setTasks(prev => prev.filter(t => t.id !== taskId)), 8000);
-                            }, processingTime);
+                        const taskId = Math.random().toString(36).substring(7);
+                        setTasks(prev => [...prev, { id: taskId, serviceName: call.name.split('_')[0] || 'System', action: call.name, status: 'processing' }]);
 
-                            responses.push({
-                                id: call.id,
-                                name: call.name,
-                                response: { 
-                                  result: `Request started: ${action} on ${serviceName}. Execution is running in the background. Keep talking and use human-like fillers while this syncs. Once it completes, the UI will show success.`
+                        try {
+                          let result = null;
+                          if (!googleToken) {
+                            result = { error: "Access token missing. User must authenticate." };
+                          } else {
+                            if (call.name === 'list_gmail_messages') {
+                              const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${(call.args as any).maxResults || 10}`, {
+                                headers: { 'Authorization': `Bearer ${googleToken}` }
+                              });
+                              result = await response.json();
+                            } else if (call.name === 'list_calendar_events') {
+                              const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=10&timeMin=${(call.args as any).timeMin || new Date().toISOString()}`, {
+                                headers: { 'Authorization': `Bearer ${googleToken}` }
+                              });
+                              result = await response.json();
+                            } else if (call.name === 'list_google_tasks') {
+                              const response = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/@default/tasks`, {
+                                headers: { 'Authorization': `Bearer ${googleToken}` }
+                              });
+                              result = await response.json();
+                            } else if (call.name === 'get_user_location') {
+                                try {
+                                  const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+                                    navigator.geolocation.getCurrentPosition(resolve, reject);
+                                  });
+                                  result = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy };
+                                } catch (e) {
+                                  result = { error: "Geolocation permission denied or unavailable." };
                                 }
-                            });
+                            } else if (call.name === 'search_youtube') {
+                                const response = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent((call.args as any).q)}&maxResults=5&type=video`, {
+                                  headers: { 'Authorization': `Bearer ${googleToken}` }
+                                });
+                                result = await response.json();
+                            } else if (call.name === 'create_google_task') {
+                                const response = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/@default/tasks`, {
+                                  method: 'POST',
+                                  headers: { 
+                                    'Authorization': `Bearer ${googleToken}`,
+                                    'Content-Type': 'application/json'
+                                  },
+                                  body: JSON.stringify({
+                                    title: (call.args as any).title,
+                                    notes: (call.args as any).notes || ""
+                                  })
+                                });
+                                result = await response.json();
+                            } else if (call.name === 'execute_google_service') {
+                                // Fallback/Generic
+                                result = { status: "Initiated", details: call.args };
+                            }
+                          }
+
+                          setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'completed' } : t));
+                          setTimeout(() => setTasks(prev => prev.filter(t => t.id !== taskId)), 8000);
+
+                          responses.push({
+                              id: call.id,
+                              name: call.name,
+                              response: { result }
+                          });
+
+                        } catch (err) {
+                          console.error("Tool execution failed:", err);
+                          setTasks(prev => prev.filter(t => t.id !== taskId));
+                          responses.push({
+                            id: call.id,
+                            name: call.name,
+                            response: { error: String(err) }
+                          });
                         }
                     }
                     if (responses.length > 0) {
