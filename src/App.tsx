@@ -363,7 +363,8 @@ export default function App() {
               settings: {
                 personaName: "Beatrice",
                 selectedVoice: "Charon",
-                customPrompt: ""
+                customPrompt: "",
+                contextSize: 20
               }
             });
           }
@@ -489,6 +490,7 @@ function MaximusAgent({ user, onLogout }: { user: User, onLogout: () => void }) 
   const [personaName, setPersonaName] = useState("Beatrice");
   const [customPrompt, setCustomPrompt] = useState("");
   const [selectedVoice, setSelectedVoice] = useState("Charon");
+  const [contextSize, setContextSize] = useState(20);
   const [isSaving, setIsSaving] = useState(false);
   
   const aiRef = useRef<GoogleGenAI | null>(null);
@@ -524,7 +526,7 @@ function MaximusAgent({ user, onLogout }: { user: User, onLogout: () => void }) 
     const historyQuery = query(
       collection(db, 'users', user.uid, 'messages'), 
       orderBy('timestamp', 'desc'), 
-      limit(20)
+      limit(contextSize)
     );
     
     const unsubHistory = onSnapshot(historyQuery, (snap) => {
@@ -550,6 +552,7 @@ function MaximusAgent({ user, onLogout }: { user: User, onLogout: () => void }) 
         if (s.personaName) setPersonaName(s.personaName);
         if (s.customPrompt) setCustomPrompt(s.customPrompt);
         if (s.selectedVoice) setSelectedVoice(s.selectedVoice);
+        if (s.contextSize !== undefined) setContextSize(s.contextSize);
       }
     }, (error) => {
        handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
@@ -572,7 +575,7 @@ function MaximusAgent({ user, onLogout }: { user: User, onLogout: () => void }) 
         sessionRef.current = null;
       }
     };
-  }, [user.uid]);
+  }, [user.uid, contextSize]);
 
   const saveSettings = async () => {
     setIsSaving(true);
@@ -582,7 +585,8 @@ function MaximusAgent({ user, onLogout }: { user: User, onLogout: () => void }) 
         settings: {
           personaName,
           customPrompt,
-          selectedVoice
+          selectedVoice,
+          contextSize
         },
         updatedAt: serverTimestamp()
       }, { merge: true });
@@ -1087,7 +1091,22 @@ ${historyContext}
                        </div>
 
                        <div className="space-y-4">
-                          <label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold ml-1">Agent Voice (Ancient Greece)</label>
+                          <div className="space-y-2 mb-6">
+                           <div className="flex items-center justify-between ml-1">
+                              <label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Conversation Context</label>
+                              <span className="text-[10px] font-mono text-amber-500 uppercase tracking-widest">{contextSize} Messages</span>
+                           </div>
+                           <input 
+                              type="range" 
+                              min="0" 
+                              max="50" 
+                              step="1"
+                              value={contextSize}
+                              onChange={(e) => setContextSize(parseInt(e.target.value))}
+                              className="w-full accent-amber-500 h-1.5 bg-white/5 rounded-lg appearance-none cursor-pointer"
+                           />
+                        </div>
+                        <label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold ml-1">Agent Voice (Ancient Greece)</label>
                           <div className="grid grid-cols-1 gap-2">
                              {VOICE_ALIASES.map(v => (
                                 <button 

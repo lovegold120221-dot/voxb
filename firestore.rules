@@ -42,11 +42,12 @@ service cloud.firestore {
 
     function isValidSettings(settings) {
       let keys = settings.keys();
-      return keys.hasAll(['personaName', 'selectedVoice', 'customPrompt']) &&
-             keys.size() == 3 &&
+      return keys.hasAll(['personaName', 'selectedVoice', 'customPrompt', 'contextSize']) &&
+             keys.size() == 4 &&
              settings.personaName is string && settings.personaName.size() <= 50 &&
              settings.selectedVoice is string && settings.selectedVoice.size() <= 50 &&
-             settings.customPrompt is string && settings.customPrompt.size() <= 2000;
+             settings.customPrompt is string && settings.customPrompt.size() <= 2000 &&
+             settings.contextSize is number;
     }
 
     function isValidMessage(data) {

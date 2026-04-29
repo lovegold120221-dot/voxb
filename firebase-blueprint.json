@@ -13,7 +13,8 @@
           "properties": {
             "personaName": { "type": "string" },
             "selectedVoice": { "type": "string" },
-            "customPrompt": { "type": "string" }
+            "customPrompt": { "type": "string" },
+            "contextSize": { "type": "number" }
           }
         }
       },
