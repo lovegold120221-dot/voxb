@@ -6,6 +6,7 @@ import { GoogleGenAI, LiveServerMessage, Modality, Type } from '@google/genai';
 import { AudioRecorder, AudioStreamer } from './lib/audio';
 import { Square, Loader2, Power, LogOut, Volume2, Command, Check, Settings, X, Save, Activity, Video, MessageSquare, Mic, MicOff, Camera } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
+import { KaraokeTranscript } from './components/KaraokeTranscript';
 
 interface ChatMessage {
   role: 'user' | 'model';
@@ -1142,22 +1143,15 @@ ${historyContext}
            </div>
 
            {/* Realtime Transcription */}
-           <div className="absolute bottom-36 left-8 right-8 flex justify-center items-center h-12 overflow-hidden pointer-events-none z-30">
+           <div className="absolute bottom-36 left-0 right-0 flex justify-center items-center h-24 pointer-events-none z-30 pointer-events-none">
              <AnimatePresence mode="wait">
                {currentTranscript && (
-                 <motion.div
+                 <KaraokeTranscript 
                    key={currentTranscript.role}
-                   initial={{ opacity: 0, x: -20, clipPath: 'inset(0 100% 0 0)' }}
-                   animate={{ opacity: 1, x: 0, clipPath: 'inset(0 0% 0 0)' }}
-                   exit={{ opacity: 0, x: 20 }}
-                   transition={{ duration: 0.4 }}
-                   className={`max-w-full truncate text-lg px-4 whitespace-nowrap ${currentTranscript.role === 'model' ? 'text-amber-500 font-serif italic' : 'text-gray-300 font-sans'}`}
-                 >
-                    <span className="font-bold opacity-50 text-xs uppercase tracking-widest mr-2 align-middle">
-                       {currentTranscript.role === 'user' ? (user.displayName?.split(' ')[0] || 'Commander') : personaName}
-                    </span>
-                   {currentTranscript.text}
-                 </motion.div>
+                   role={currentTranscript.role} 
+                   text={currentTranscript.text} 
+                   name={currentTranscript.role === 'user' ? (user.displayName?.split(' ')[0] || 'Commander') : personaName} 
+                 />
                )}
              </AnimatePresence>
            </div>
