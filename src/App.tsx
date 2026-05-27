@@ -1,12 +1,18 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp, collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { GoogleGenAI, LiveServerMessage, Modality, Type } from '@google/genai';
 import { AudioRecorder, AudioStreamer } from './lib/audio';
-import { Square, Loader2, Power, LogOut, Check, Settings, X, Save, Activity, Video, MessageSquare } from 'lucide-react';
+import { Square, Loader2, Power, Check, Settings, X, Save, Activity, Video, MessageSquare } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { KaraokeTranscript } from './components/KaraokeTranscript';
+import { ChatPage } from './components/ChatPage';
+import { VideoPage } from './components/VideoPage';
+import { ComputerPage } from './components/ComputerPage';
+import { detectExecutionIntent } from './lib/executionDetector';
+import { createSandboxTask, pollTaskStatus, stopPolling, retryTask } from './lib/sandboxClient';
+import type { ComputerTask } from './lib/executionDetector';
 
 interface ChatMessage {
   role: 'user' | 'model';
@@ -158,10 +164,10 @@ Speak normally, respectfully, and honestly.
 `;
 
 const getGeminiApiKey = () => {
-  const key = import.meta.env.VITE_GEMINI_API_KEY;
+  const key = process.env.GEMINI_API_KEY;
 
   if (!key) {
-    console.error("Missing VITE_GEMINI_API_KEY. Check Vercel env vars, make sure it is enabled for the correct environment, then redeploy.");
+    console.error("Missing GEMINI_API_KEY. Check .env.local file.");
   }
 
   return key || "";
@@ -172,12 +178,41 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [googleToken, setGoogleToken] = useState<string | null>(null);
 
+  const clearStoredToken = useCallback(() => {
+    try {
+      localStorage.removeItem('beatrice_google_token');
+      localStorage.removeItem('beatrice_google_uid');
+    } catch {}
+  }, []);
+
+  const storeToken = useCallback((token: string, uid: string) => {
+    try {
+      localStorage.setItem('beatrice_google_token', token);
+      localStorage.setItem('beatrice_google_uid', uid);
+    } catch {}
+  }, []);
+
+  const restoreStoredToken = useCallback((uid: string): string | null => {
+    try {
+      const stored = localStorage.getItem('beatrice_google_token');
+      const storedUid = localStorage.getItem('beatrice_google_uid');
+      return stored && storedUid === uid ? stored : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);
 
       if (u) {
         try {
+          const restored = restoreStoredToken(u.uid);
+          if (restored) {
+            setGoogleToken(restored);
+          }
+
           const userRef = doc(db, 'users', u.uid);
           const userSnap = await getDoc(userRef);
 
@@ -225,6 +260,7 @@ export default function App() {
 
       if (credential?.accessToken) {
         setGoogleToken(credential.accessToken);
+        storeToken(credential.accessToken, result.user.uid);
       }
     } catch (error) {
       console.error("Login failed:", error);
@@ -233,6 +269,7 @@ export default function App() {
 
   const handleLogout = () => {
     setGoogleToken(null);
+    clearStoredToken();
     signOut(auth);
   };
 
@@ -258,11 +295,7 @@ export default function App() {
         </div>
 
         <div
-          className="absolute inset-0 opacity-[0.03] pointer-events-none"
-          style={{
-            backgroundImage: 'radial-gradient(circle, #f59e0b 1px, transparent 1px)',
-            backgroundSize: '40px 40px'
-          }}
+          className="absolute inset-0 opacity-[0.03] pointer-events-none dot-pattern"
         />
 
         <motion.div
@@ -335,14 +368,21 @@ function MaximusAgent({
   const [volumes, setVolumes] = useState<number[]>(Array(11).fill(0.05));
 
   const [isCameraActive, setIsCameraActive] = useState(false);
-  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [showVideoPage, setShowVideoPage] = useState(false);
+  const [showChatPage, setShowChatPage] = useState(false);
   const [chatInput, setChatInput] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const [tasks, setTasks] = useState<ActionTask[]>([]);
   const [historyContext, setHistoryContext] = useState<string>("");
   const [currentTranscript, setCurrentTranscript] = useState<{ role: 'user' | 'model'; text: string } | null>(null);
 
   const [showSettings, setShowSettings] = useState(false);
+  const [showComputerPage, setShowComputerPage] = useState(false);
+  const [computerTask, setComputerTask] = useState<ComputerTask | null>(null);
+  const [computerOutput, setComputerOutput] = useState<{ content: string; title: string } | null>(null);
+  const [computerPreviewUrl, setComputerPreviewUrl] = useState<string | null>(null);
+  const [computerDownloadUrl, setComputerDownloadUrl] = useState<string | null>(null);
   const [personaName, setPersonaName] = useState("Beatrice");
   const [customPrompt, setCustomPrompt] = useState("");
   const [selectedVoice, setSelectedVoice] = useState("Charon");
@@ -364,6 +404,7 @@ function MaximusAgent({
   const transcriptRef = useRef<{ text: string; role: 'user' | 'model' } | null>(null);
   const transcriptTimeoutRef = useRef<any>(null);
   const speakingTimeoutRef = useRef<any>(null);
+  const lastVoiceTriggerRef = useRef<string>('');
 
   const ensureAudio = async () => {
     if (!audioStreamerRef.current) {
@@ -435,6 +476,7 @@ function MaximusAgent({
       }
 
       setIsCameraActive(false);
+      sendTextToLive("The user just turned off their camera. They can no longer see you either.");
       return;
     }
 
@@ -472,8 +514,93 @@ function MaximusAgent({
           }
         }
       }, 1000);
+
+      sendTextToLive("The user just turned on their camera. You can now see them. React naturally - greet them like you're on a video call. Make eye contact references, comment on what you see casually, keep it warm and human.");
     } catch (err) {
       console.error("Camera error:", err);
+    }
+  };
+
+  const activeTaskIdRef = useRef<string | null>(null);
+
+  const tryTriggerComputerTask = async (text: string) => {
+    const intent = detectExecutionIntent(text);
+    if (!intent) return;
+
+    try {
+      const { taskId, task } = await createSandboxTask(intent.type, intent.label, text);
+      activeTaskIdRef.current = taskId;
+      setComputerTask(task);
+      setComputerOutput(null);
+      setComputerPreviewUrl(null);
+      setComputerDownloadUrl(null);
+      setShowComputerPage(true);
+
+      pollTaskStatus(
+        taskId,
+        (updatedTask) => {
+          setComputerTask(updatedTask);
+        },
+        (finalTask, output, previewUrl, downloadUrl) => {
+          setComputerTask(finalTask);
+          if (output) {
+            setComputerOutput({ content: output.content, title: output.title });
+          }
+          if (previewUrl) setComputerPreviewUrl(previewUrl);
+          if (downloadUrl) setComputerDownloadUrl(downloadUrl);
+
+          const outputName = output?.title || finalTask.label;
+          sendTextToLive(
+            `The user asked: "${text}". The task is ${finalTask.status === 'done' ? 'finished' : 'stopped'}: ${outputName}. ${finalTask.status === 'done' ? 'The output is ready. Tell the Boss naturally that it is ready to view.' : 'There was a problem. Tell the Boss honestly that it ran into an issue but the partial result is saved.'} Keep it casual.`
+          );
+        },
+        (error) => {
+          console.error('Task error:', error);
+          sendTextToLive(
+            `The task for "${text}" ran into a problem. Tell the Boss honestly what happened in simple words — no technical jargon. Mention that the partial output might still be saved.`
+          );
+        }
+      );
+    } catch (err) {
+      console.error('Failed to create sandbox task:', err);
+    }
+  };
+
+  const handleRetryTask = async (taskId: string) => {
+    try {
+      setComputerTask(null);
+      setComputerOutput(null);
+      setComputerPreviewUrl(null);
+      setComputerDownloadUrl(null);
+
+      const { taskId: newId, task } = await retryTask(taskId);
+      activeTaskIdRef.current = newId;
+      setComputerTask(task);
+
+      pollTaskStatus(
+        newId,
+        (updatedTask) => {
+          setComputerTask(updatedTask);
+        },
+        (finalTask, output, previewUrl, downloadUrl) => {
+          setComputerTask(finalTask);
+          if (output) {
+            setComputerOutput({ content: output.content, title: output.title });
+          }
+          if (previewUrl) setComputerPreviewUrl(previewUrl);
+          if (downloadUrl) setComputerDownloadUrl(downloadUrl);
+
+          const outputName = output?.title || finalTask.label;
+          sendTextToLive(
+            `The retry task is ${finalTask.status === 'done' ? 'finished' : 'stopped'}: ${outputName}. ${finalTask.status === 'done' ? 'The output is ready. Tell the Boss naturally that it is ready to view.' : 'There was a problem on retry. Tell the Boss honestly.'}`
+          );
+        },
+        (error) => {
+          console.error('Retry error:', error);
+        }
+      );
+    } catch (err) {
+      console.error('Failed to retry task:', err);
     }
   };
 
@@ -485,8 +612,10 @@ function MaximusAgent({
     if (!text || !sessionRef.current || !isActive) return;
 
     setCurrentTranscript({ role: 'user', text });
+    setMessages(prev => [...prev, { role: 'user', text, timestamp: new Date().toISOString() }]);
     saveMessage('user', text);
     sendTextToLive(text);
+    tryTriggerComputerTask(text);
     setChatInput("");
   };
 
@@ -547,11 +676,15 @@ function MaximusAgent({
       (snap) => {
         const msgs: string[] = [];
         const docs = snap.docs.reverse();
+        const messageList: ChatMessage[] = [];
 
         docs.forEach(d => {
           const m = d.data() as ChatMessage;
           msgs.push(`${m.role.toUpperCase()}: ${m.text}`);
+          messageList.push(m);
         });
+
+        setMessages(messageList);
 
         if (msgs.length > 0) {
           setHistoryContext("Previous conversation for context memory:\n" + msgs.join("\n"));
@@ -660,16 +793,32 @@ ${VOICE_PERSONALITY_PROMPT}
 ${historyContext}
 `;
 
+    const gFetch = async (tok: string, url: string, options?: RequestInit): Promise<{ ok: boolean; status: number; data: any }> => {
+      try {
+        const res = await fetch(url, {
+          ...options,
+          headers: { ...options?.headers, Authorization: `Bearer ${tok}` },
+        });
+        const data = await res.json();
+        const isAuthErr = res.status === 401 || res.status === 403;
+        return { ok: res.ok, status: res.status, data: isAuthErr ? { ...data, _authError: true } : data };
+      } catch (err) {
+        return { ok: false, status: 0, data: { error: String(err) } };
+      }
+    };
+
+    const tok = googleToken;
+
     const googleTools = [
       {
         name: "list_gmail_messages",
-        description: "List the most recent messages from the user's Gmail inbox.",
+        description: "Read the most recent emails from the user's Gmail inbox. Returns subject, sender, date, and preview for each message.",
         parameters: {
           type: Type.OBJECT,
           properties: {
             maxResults: {
               type: Type.NUMBER,
-              description: "Number of messages to list. Maximum 10."
+              description: "Number of emails to fetch. Maximum 5."
             }
           }
         }
@@ -733,6 +882,69 @@ ${historyContext}
             }
           },
           required: ["title"]
+        }
+      },
+      {
+        name: "list_drive_files",
+        description: "List files and folders from the user's Google Drive.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            pageSize: {
+              type: Type.NUMBER,
+              description: "Number of files to list. Maximum 20."
+            }
+          }
+        }
+      },
+      {
+        name: "search_drive_files",
+        description: "Search the user's Google Drive using a query string (e.g. 'title contains report').",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            q: {
+              type: Type.STRING,
+              description: "The Drive API query string."
+            }
+          },
+          required: ["q"]
+        }
+      },
+      {
+        name: "get_drive_file",
+        description: "Get metadata and download link for a specific file in Google Drive.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            fileId: {
+              type: Type.STRING,
+              description: "The Drive file ID."
+            }
+          },
+          required: ["fileId"]
+        }
+      },
+      {
+        name: "send_gmail_message",
+        description: "Send an email message via Gmail on behalf of the user.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            to: {
+              type: Type.STRING,
+              description: "Recipient email address."
+            },
+            subject: {
+              type: Type.STRING,
+              description: "Email subject line."
+            },
+            body: {
+              type: Type.STRING,
+              description: "Email body content in plain text."
+            }
+          },
+          required: ["to", "subject", "body"]
         }
       }
     ];
@@ -808,41 +1020,67 @@ ${historyContext}
                   try {
                     let result: any = null;
 
-                    if (!googleToken && call.name !== 'get_user_location' && call.name !== 'execute_google_service') {
-                      result = { error: "Access token missing. User must authenticate Google services." };
+                    if (call.name !== 'get_user_location' && !tok) {
+                      result = { error: "Access token expired or missing. Please re-authenticate Google services in settings." };
                     } else if (call.name === 'list_gmail_messages') {
-                      const response = await fetch(
-                        `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${Math.min((call.args as any).maxResults || 10, 10)}`,
-                        {
-                          headers: {
-                            Authorization: `Bearer ${googleToken}`
+                      const max = Math.min((call.args as any).maxResults || 5, 5);
+                      const listR = await gFetch(tok, `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${max}&q=in:inbox`);
+                      if (listR.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
+                      else if (!listR.ok) { result = { error: listR.data?.error || 'Gmail list failed' }; }
+                      else {
+                        const msgList = listR.data?.messages || [];
+                        const details = await Promise.all(msgList.slice(0, max).map(async (m: any) => {
+                          const dR = await gFetch(tok, `https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`);
+                          if (dR.ok && dR.data) {
+                            const headers = (dR.data.payload?.headers || []).reduce((acc: any, h: any) => { acc[h.name] = h.value; return acc; }, {});
+                            return { id: m.id, snippet: dR.data.snippet, subject: headers.Subject, from: headers.From, date: headers.Date };
                           }
-                        }
-                      );
-
-                      result = await response.json();
+                          return m;
+                        }));
+                        result = { messages: details, resultSizeEstimate: listR.data.resultSizeEstimate };
+                      }
                     } else if (call.name === 'list_calendar_events') {
-                      const response = await fetch(
-                        `https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=10&timeMin=${encodeURIComponent((call.args as any).timeMin || new Date().toISOString())}`,
-                        {
-                          headers: {
-                            Authorization: `Bearer ${googleToken}`
-                          }
-                        }
-                      );
-
-                      result = await response.json();
+                      const r = await gFetch(tok, `https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=10&timeMin=${encodeURIComponent((call.args as any).timeMin || new Date().toISOString())}`);
+                      if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
+                      else if (!r.ok) { result = { error: r.data?.error || 'Calendar request failed' }; }
+                      else { result = r.data; }
                     } else if (call.name === 'list_google_tasks') {
-                      const response = await fetch(
-                        `https://tasks.googleapis.com/tasks/v1/lists/@default/tasks`,
-                        {
-                          headers: {
-                            Authorization: `Bearer ${googleToken}`
-                          }
-                        }
-                      );
-
-                      result = await response.json();
+                      const r = await gFetch(tok, `https://tasks.googleapis.com/tasks/v1/lists/@default/tasks`);
+                      if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
+                      else if (!r.ok) { result = { error: r.data?.error || 'Tasks request failed' }; }
+                      else { result = r.data; }
+                    } else if (call.name === 'list_drive_files') {
+                      const r = await gFetch(tok, `https://www.googleapis.com/drive/v3/files?pageSize=${Math.min((call.args as any).pageSize || 20, 20)}&fields=files(id,name,mimeType,size,modifiedTime,webViewLink)`);
+                      if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
+                      else if (!r.ok) { result = { error: r.data?.error || 'Drive request failed' }; }
+                      else { result = r.data; }
+                    } else if (call.name === 'search_drive_files') {
+                      const q = encodeURIComponent((call.args as any).q || '');
+                      const r = await gFetch(tok, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,size,modifiedTime,webViewLink)`);
+                      if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
+                      else if (!r.ok) { result = { error: r.data?.error || 'Drive search failed' }; }
+                      else { result = r.data; }
+                    } else if (call.name === 'get_drive_file') {
+                      const fileId = (call.args as any).fileId;
+                      const r = await gFetch(tok, `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,size,modifiedTime,webViewLink,webContentLink`);
+                      if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
+                      else if (!r.ok) { result = { error: r.data?.error || 'Drive file request failed' }; }
+                      else { result = r.data; }
+                    } else if (call.name === 'send_gmail_message') {
+                      const args = call.args as any;
+                      if (!tok) { result = { error: "Access token missing. Re-authenticate in settings." }; } else {
+                        const emailLines = [
+                          `From: me`, `To: ${args.to}`, `Subject: ${args.subject}`,
+                          'Content-Type: text/plain; charset=UTF-8', '', args.body || ''
+                        ];
+                        const encodedEmail = btoa(emailLines.join('\r\n')).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+                        const r = await gFetch(tok, `https://gmail.googleapis.com/gmail/v1/users/me/messages/send`,
+                          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raw: encodedEmail }) }
+                        );
+                        if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
+                        else if (!r.ok) { result = { error: r.data?.error || 'Send failed' }; }
+                        else { result = r.data; }
+                      }
                     } else if (call.name === 'get_user_location') {
                       try {
                         const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
@@ -858,38 +1096,35 @@ ${historyContext}
                         result = { error: "Geolocation permission denied or unavailable." };
                       }
                     } else if (call.name === 'search_youtube') {
-                      const response = await fetch(
-                        `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent((call.args as any).q)}&maxResults=5&type=video`,
-                        {
-                          headers: {
-                            Authorization: `Bearer ${googleToken}`
-                          }
-                        }
-                      );
-
-                      result = await response.json();
+                      const r = await gFetch(tok, `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent((call.args as any).q)}&maxResults=5&type=video`);
+                      if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
+                      else if (!r.ok) { result = { error: r.data?.error || 'YouTube search failed' }; }
+                      else { result = r.data; }
                     } else if (call.name === 'create_google_task') {
-                      const response = await fetch(
-                        `https://tasks.googleapis.com/tasks/v1/lists/@default/tasks`,
-                        {
-                          method: 'POST',
-                          headers: {
-                            Authorization: `Bearer ${googleToken}`,
-                            'Content-Type': 'application/json'
-                          },
-                          body: JSON.stringify({
-                            title: (call.args as any).title,
-                            notes: (call.args as any).notes || ""
-                          })
-                        }
+                      const r = await gFetch(tok, `https://tasks.googleapis.com/tasks/v1/lists/@default/tasks`,
+                        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: (call.args as any).title, notes: (call.args as any).notes || "" }) }
                       );
-
-                      result = await response.json();
+                      if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
+                      else if (!r.ok) { result = { error: r.data?.error || 'Task creation failed' }; }
+                      else { result = r.data; }
                     } else if (call.name === 'execute_google_service') {
-                      result = {
-                        status: "Initiated",
-                        details: call.args
-                      };
+                      if (!tok) { result = { error: "Access token missing. Re-authenticate in settings." }; } else {
+                        const args = call.args as any;
+                        const serviceMap: Record<string, string> = {
+                          gmail: 'https://gmail.googleapis.com',
+                          calendar: 'https://www.googleapis.com/calendar/v3',
+                          tasks: 'https://tasks.googleapis.com',
+                          drive: 'https://www.googleapis.com/drive/v3',
+                          youtube: 'https://www.googleapis.com/youtube/v3',
+                          sheets: 'https://sheets.googleapis.com/v4',
+                          docs: 'https://docs.googleapis.com/v1',
+                        };
+                        const baseUrl = serviceMap[args.serviceName?.toLowerCase()] || `https://${args.serviceName}.googleapis.com`;
+                        const r = await gFetch(tok, `${baseUrl}/${args.action || ''}`);
+                        if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
+                        else if (!r.ok) { result = { error: r.data?.error || 'Service request failed' }; }
+                        else { result = r.data; }
+                      }
                     }
 
                     setTasks(prev =>
@@ -943,6 +1178,7 @@ ${historyContext}
                 if (text) {
                   setCurrentTranscript({ text, role: 'user' });
                   saveMessage('user', text);
+                  tryTriggerComputerTask(text);
 
                   if (transcriptTimeoutRef.current) clearTimeout(transcriptTimeoutRef.current);
                   transcriptTimeoutRef.current = setTimeout(() => setCurrentTranscript(null), 4000);
@@ -1004,6 +1240,7 @@ ${historyContext}
                 const current = transcriptRef.current;
 
                 if (current && current.role === 'model' && current.text) {
+                  setMessages(prev => [...prev, { role: 'model', text: current.text, timestamp: new Date().toISOString() }]);
                   saveMessage('model', current.text);
                   transcriptRef.current = null;
                 }
@@ -1108,116 +1345,87 @@ ${historyContext}
   };
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white flex flex-col h-[100dvh] overflow-hidden">
-      <header className="px-8 py-6 flex items-center justify-between border-b border-white/5 bg-[#050505] z-20">
-        <div className="flex flex-col">
-          <span className="text-[10px] uppercase tracking-[0.2em] text-amber-500/80 font-semibold">
-            Primary User
-          </span>
-          <h1 className="text-2xl font-light tracking-tight text-white">
-            {user.displayName || 'Commander'}
-          </h1>
-        </div>
+    <div className="min-h-screen bg-[#161312] text-zinc-100 flex flex-col h-[100dvh] overflow-hidden select-none relative">
+      <div
+        className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(208,167,139,0.04),transparent_75%)] pointer-events-none z-0"
+      />
 
-        <div className="flex items-center gap-4">
+      <header className="sticky top-0 w-full bg-[#161312]/95 backdrop-blur-md border-b border-zinc-800/60 px-6 py-4 flex items-center justify-between z-30">
+        <div className="flex items-center">
           <button
             onClick={() => setShowSettings(true)}
-            className="p-2.5 rounded-full hover:bg-white/5 transition-colors text-gray-500 hover:text-gray-300"
+            className="p-1.5 -ml-1.5 rounded-lg text-zinc-400 hover:text-[#d0a78b] hover:bg-zinc-800/50 transition-all duration-300"
+            aria-label="Open Settings"
           >
-            <Settings className="w-5 h-5" />
+            <Settings className="w-6 h-6" />
           </button>
+        </div>
 
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-amber-700 p-[1px]">
-            <div className="w-full h-full rounded-2xl bg-[#0A0A0B] flex items-center justify-center overflow-hidden">
-              {user.photoURL ? (
-                <img src={user.photoURL} alt="Profile" className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-amber-500 font-serif text-xl italic">
-                  {user.displayName?.charAt(0) || 'M'}
-                </span>
-              )}
-            </div>
-          </div>
+        <div className="text-center flex flex-col items-center">
+          <h1 className="text-xl font-semibold tracking-wide text-[#d0a78b]">{personaName}</h1>
+          <p className="text-[9px] text-zinc-500 tracking-[0.22em] lowercase -mt-0.5">eburon ai</p>
+        </div>
 
+        <div className="flex items-center">
           <button
             onClick={onLogout}
-            className="p-2.5 rounded-full hover:bg-white/5 transition-colors text-gray-500 hover:text-gray-300"
+            className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 overflow-hidden flex items-center justify-center hover:border-[#d0a78b]/50 transition-all duration-300"
+            aria-label="User Profile"
           >
-            <LogOut className="w-5 h-5" />
+            {user.photoURL ? (
+              <img src={user.photoURL} alt="Profile" className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-zinc-400 text-xs font-medium">{user.displayName?.charAt(0) || 'M'}</span>
+            )}
           </button>
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center relative p-6">
-        <div className="relative w-full max-w-sm aspect-square flex items-center justify-center mb-12">
-          <AnimatePresence>
-            {isActive && (
-              <motion.div
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{
-                  scale: isAgentSpeaking ? 1.4 : 1.1,
-                  opacity: isAgentSpeaking ? 0.3 : 0.1
-                }}
-                transition={{
-                  duration: isAgentSpeaking ? 0.2 : 1,
-                  repeat: Infinity,
-                  repeatType: "reverse"
-                }}
-                className="absolute inset-0 rounded-full bg-gradient-to-tr from-amber-500 via-amber-400 to-orange-500 blur-3xl opacity-20"
-              />
-            )}
-          </AnimatePresence>
+      <main className="flex-1 flex flex-col items-center justify-start relative z-10 pt-4 pb-24 overflow-hidden">
 
-          {isActive && (
-            <>
-              <div className="absolute w-64 h-64 rounded-full border border-amber-500/10 scale-125"></div>
-              <div className="absolute w-64 h-64 rounded-full border border-amber-500/20 scale-110"></div>
-            </>
-          )}
+        <p className="text-zinc-300 text-sm font-normal tracking-wide mt-2 px-6 text-center transition-all duration-300">
+          {isActive ? 'Beatrice is listening...' : connecting ? 'Connecting...' : 'Beatrice is offline. Connect to begin.'}
+        </p>
 
-          <motion.div
-            animate={{
-              scale: isActive ? (isAgentSpeaking ? [1, 1.05, 1] : [1, 1.01, 1]) : 1,
-              boxShadow: isActive ? '0 0 50px rgba(245, 158, 11, 0.15)' : '0 0 0px rgba(0,0,0,0)'
-            }}
-            transition={{
-              duration: isAgentSpeaking ? 0.4 : 2,
-              repeat: Infinity,
-              repeatType: "reverse"
-            }}
-            className="relative z-10 w-48 h-48 rounded-full shadow-2xl flex items-center justify-center overflow-hidden"
-            style={{
-              background: isActive
-                ? 'linear-gradient(180deg, rgba(245, 158, 11, 0.15) 0%, transparent 100%)'
-                : 'linear-gradient(135deg, #09090b 0%, #18181b 100%)',
-              border: isActive ? '1px solid rgba(245, 158, 11, 0.3)' : '1px solid rgba(255,255,255,0.05)',
-              backdropFilter: 'blur(24px)'
-            }}
+        <div className="relative flex-1 flex items-center justify-center w-full max-h-[300px] mt-6">
+          <div
+            className={`absolute w-72 h-72 ${isActive ? 'bg-[#d0a78b]/25' : 'bg-[#d0a78b]/10'} rounded-full blur-3xl transition-all duration-700 ${isActive ? 'orb-pulse-active' : ''}`}
+          />
+
+          <button
+            onClick={isActive ? stopSession : startSession}
+            disabled={connecting}
+            className="relative w-52 h-52 rounded-full bg-[#1c1614]/60 border border-[#d0a78b]/20 overflow-hidden flex items-center justify-center transition-all duration-500 hover:border-[#d0a78b] hover:shadow-[0_0_55px_rgba(208,167,139,0.3)] active:scale-[0.98]"
+            aria-label="Toggle Voice Assistant"
           >
-            {connecting ? (
-              <Loader2 className="w-10 h-10 animate-spin text-amber-400" />
-            ) : isActive ? (
-              <div className="flex gap-1.5 items-center h-20">
-                {volumes.map((v, i) => (
-                  <motion.div
-                    key={i}
-                    style={{ height: Math.max(8, v * 160) + 'px' }}
-                    className="w-1.5 bg-amber-500 rounded-full transition-all duration-75"
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="text-center">
-                <p className="text-[10px] font-bold tracking-widest text-gray-500 uppercase mb-1">
-                  Standby
-                </p>
-                <h2 className="text-2xl font-serif italic text-amber-500">{personaName}</h2>
-              </div>
-            )}
-          </motion.div>
+            <div className="absolute inset-0 bg-black/5 backdrop-blur-[12px] z-10 rounded-full pointer-events-none" />
+
+            <div className="absolute inset-0 w-full h-full flex items-center justify-center transition-transform duration-100 ease-out z-0">
+              <div className="blob-1 absolute w-48 h-48 rounded-full bg-[radial-gradient(circle,rgba(208,167,139,0.65)_0%,transparent_70%)] blur-md" />
+              <div className="blob-2 absolute w-44 h-44 rounded-full bg-[radial-gradient(circle,rgba(171,123,96,0.45)_0%,transparent_70%)] blur-md" />
+              <div className="blob-3 absolute w-40 h-40 rounded-full bg-[radial-gradient(circle,rgba(235,208,188,0.55)_0%,transparent_70%)] blur-md" />
+              <div className="absolute w-16 h-16 rounded-full bg-[#d0a78b]/15 blur-xl" />
+            </div>
+
+            <div className="absolute inset-0 z-20 rounded-full flex items-center justify-center">
+              {connecting ? (
+                <Loader2 className="w-10 h-10 animate-spin text-[#d0a78b]" />
+              ) : isActive ? (
+                <div className="flex gap-1.5 items-center h-20">
+                  {volumes.map((v, i) => (
+                    <motion.div
+                      key={i}
+                      style={{ height: Math.max(6, v * 120) + 'px' }}
+                      className="w-1.5 bg-[#d0a78b]/80 rounded-full transition-all duration-75"
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </button>
         </div>
 
-        <div className="absolute bottom-36 left-0 right-0 flex justify-center items-center h-24 pointer-events-none z-30">
+        <div className="w-full max-w-sm px-8 flex flex-col items-center justify-center text-center h-[64px] transition-opacity duration-700">
           <AnimatePresence mode="wait">
             {currentTranscript && (
               <KaraokeTranscript
@@ -1229,193 +1437,175 @@ ${historyContext}
             )}
           </AnimatePresence>
         </div>
-
-        <div className="flex flex-col items-center gap-6 mt-8 z-40 relative">
-          <div className="flex items-center gap-4">
-            <AnimatePresence>
-              {isActive && (
-                <motion.button
-                  initial={{ scale: 0, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0, opacity: 0 }}
-                  onClick={() => setIsChatOpen(!isChatOpen)}
-                  className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg border ${
-                    isChatOpen
-                      ? 'bg-amber-500 text-black border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.5)]'
-                      : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
-                  }`}
-                >
-                  <MessageSquare className="w-5 h-5" />
-                </motion.button>
-              )}
-            </AnimatePresence>
-
-            {!isActive ? (
-              <button
-                onClick={startSession}
-                disabled={connecting}
-                className="w-16 h-16 bg-gradient-to-br from-amber-500 to-amber-700 p-[1px] rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100 shadow-[0_0_20px_rgba(245,158,11,0.2)] relative z-50"
-              >
-                <div className="w-full h-full rounded-full bg-[#0A0A0B] flex items-center justify-center">
-                  {connecting ? (
-                    <Loader2 className="w-6 h-6 text-amber-500 animate-spin" />
-                  ) : (
-                    <Power className="w-6 h-6 text-amber-500" />
-                  )}
-                </div>
-              </button>
-            ) : (
-              <button
-                onClick={stopSession}
-                className="w-16 h-16 bg-red-500/10 border border-red-500/30 text-red-500 rounded-full flex items-center justify-center hover:bg-red-500/20 hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(239,68,68,0.2)] relative z-50"
-              >
-                <Square className="w-6 h-6 fill-current" />
-              </button>
-            )}
-
-            <AnimatePresence>
-              {isActive && (
-                <motion.button
-                  initial={{ scale: 0, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0, opacity: 0 }}
-                  onClick={toggleCamera}
-                  className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg border ${
-                    isCameraActive
-                      ? 'bg-emerald-500 text-black border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)]'
-                      : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
-                  }`}
-                >
-                  <Video className="w-5 h-5" />
-                </motion.button>
-              )}
-            </AnimatePresence>
-          </div>
-
-          <p className="text-[10px] font-bold tracking-widest text-gray-500 uppercase">
-            {isActive ? 'Active Session' : connecting ? 'Connecting...' : 'Tap to initialize'}
-          </p>
-
-          <AnimatePresence>
-            {isActive && isChatOpen && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 10 }}
-                className="absolute top-24 w-72 bg-[#0A0A0B]/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 shadow-2xl"
-              >
-                <form onSubmit={handleSendChat} className="flex gap-2">
-                  <input
-                    type="text"
-                    value={chatInput}
-                    autoFocus
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Type a message..."
-                    className="flex-1 bg-white/5 text-sm text-white px-3 py-2 rounded-xl border border-white/10 focus:outline-none focus:border-amber-500/50"
-                  />
-                  <button
-                    type="submit"
-                    className="p-2 bg-amber-500 text-black rounded-xl hover:bg-amber-400 transition-colors hidden sm:block"
-                  >
-                    <Check className="w-4 h-4" />
-                  </button>
-                </form>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          <canvas ref={canvasRef} className="hidden" />
-        </div>
-
-        <AnimatePresence>
-          {isCameraActive && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.8, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.8, y: 20 }}
-              className="absolute bottom-32 right-8 w-24 h-32 rounded-2xl overflow-hidden border border-white/10 shadow-2xl z-40 bg-black"
-            >
-              <video
-                ref={videoRef}
-                className="w-full h-full object-cover transform -scale-x-100"
-                autoPlay
-                playsInline
-                muted
-              />
-              <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <div className="absolute bottom-6 left-0 right-0 px-8">
-          <AnimatePresence>
-            {tasks.map(task => (
-              <motion.div
-                key={task.id}
-                layout
-                initial={{ opacity: 0, y: 20, scale: 0.9 }}
-                animate={{
-                  opacity: 1,
-                  y: 0,
-                  scale: 1,
-                  backgroundColor: task.status === 'processing' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(16, 185, 129, 0.15)',
-                  borderColor: task.status === 'processing' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.3)',
-                }}
-                exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-                transition={{ type: "spring", stiffness: 300, damping: 25 }}
-                className="mb-2 p-3 rounded-2xl border flex items-center gap-3 backdrop-blur-md shadow-lg overflow-hidden relative"
-              >
-                {task.status === 'completed' && (
-                  <motion.div
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: [1, 2], opacity: [0.3, 0] }}
-                    transition={{ duration: 0.8, ease: "easeOut" }}
-                    className="absolute inset-0 bg-emerald-500/30 rounded-2xl pointer-events-none"
-                  />
-                )}
-
-                {task.status === 'processing' ? (
-                  <div className="relative flex-shrink-0">
-                    <Loader2 className="w-4 h-4 text-amber-500 animate-spin" />
-                    <motion.div
-                      animate={{ scale: [1, 1.8], opacity: [0.5, 0] }}
-                      transition={{ duration: 1.5, repeat: Infinity, ease: "easeOut" }}
-                      className="absolute inset-0 bg-amber-500/50 rounded-full blur-[2px]"
-                    />
-                  </div>
-                ) : (
-                  <motion.div
-                    initial={{ scale: 0, rotate: -45 }}
-                    animate={{ scale: 1, rotate: 0 }}
-                    transition={{ type: "spring", stiffness: 500, damping: 15 }}
-                    className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0 shadow-[0_0_15px_rgba(16,185,129,0.4)] z-10"
-                  >
-                    <Check className="w-3.5 h-3.5 text-black" strokeWidth={4} />
-                  </motion.div>
-                )}
-
-                <div className="flex-1 truncate text-xs relative z-10">
-                  <div className="flex items-center gap-1.5 overflow-hidden">
-                    <motion.span
-                      animate={{ color: task.status === 'processing' ? '#f59e0b' : '#10b981' }}
-                      className="font-mono uppercase font-bold"
-                    >
-                      {task.serviceName}
-                    </motion.span>
-                    <span className="text-gray-400 truncate">: {task.action}</span>
-                  </div>
-                  <motion.span
-                    animate={{ opacity: task.status === 'processing' ? 0.7 : 1 }}
-                    className="text-[10px] text-gray-500 block font-medium"
-                  >
-                    {task.status === 'processing' ? 'Processing in background...' : 'Successfully completed'}
-                  </motion.span>
-                </div>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
       </main>
+
+      <footer className="sticky bottom-0 w-full h-[92px] bg-[#161312]/95 backdrop-blur-md border-t border-zinc-800/60 z-20 px-6 box-border select-none">
+        <div className="relative w-full h-full flex items-center justify-between">
+
+          <button
+            onClick={() => setShowChatPage(true)}
+            className="absolute left-[50px] flex flex-col items-center justify-center text-zinc-400 hover:text-[#d0a78b] transition-colors duration-300"
+          >
+            <MessageSquare className="w-5 h-5 mb-1" />
+            <span className="text-xs font-medium">Chat</span>
+          </button>
+
+          <button
+            onClick={isActive ? stopSession : startSession}
+            disabled={connecting}
+            className={`absolute left-1/2 -translate-x-1/2 bottom-[55px] w-20 h-20 rounded-full flex flex-col items-center justify-center shadow-xl transition-all duration-300 border-4 border-[#161312] z-30 ${
+              isActive
+                ? 'bg-zinc-900 text-[#d0a78b] border-2 border-[#d0a78b]/40'
+                : 'bg-[#d0a78b] text-black hover:bg-[#ebd0bc] shadow-[#d0a78b]/20'
+            }`}
+          >
+            {connecting ? (
+              <Loader2 className="w-7 h-7 animate-spin" />
+            ) : isActive ? (
+              <Square className="w-6 h-6 fill-current" />
+            ) : (
+              <Power className="w-7 h-7" />
+            )}
+            <span className="text-[9px] font-extrabold uppercase tracking-widest mt-1">
+              {isActive ? 'Stop' : 'Start'}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setShowVideoPage(true)}
+            className="absolute right-[50px] flex flex-col items-center justify-center text-zinc-400 hover:text-[#d0a78b] transition-colors duration-300"
+          >
+            <Video className="w-5 h-5 mb-1" />
+            <span className="text-xs font-medium">Video</span>
+          </button>
+        </div>
+      </footer>
+
+      <canvas ref={canvasRef} className="hidden" />
+
+      <AnimatePresence>
+        {showChatPage && (
+          <ChatPage
+            messages={messages}
+            chatInput={chatInput}
+            setChatInput={setChatInput}
+            onSend={handleSendChat}
+            onClose={() => setShowChatPage(false)}
+            isActive={isActive}
+            personaName={personaName}
+            userName={user.displayName?.split(' ')[0] || 'Commander'}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showVideoPage && (
+          <VideoPage
+            onClose={() => setShowVideoPage(false)}
+            isCameraActive={isCameraActive}
+            toggleCamera={toggleCamera}
+            videoRef={videoRef}
+            canvasRef={canvasRef}
+            isActive={isActive}
+            sendVideoToLive={sendVideoToLive}
+            sendTextToLive={sendTextToLive}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showComputerPage && computerTask && (
+          <ComputerPage
+            task={computerTask}
+            onClose={() => {
+              if (activeTaskIdRef.current) {
+                stopPolling(activeTaskIdRef.current);
+                activeTaskIdRef.current = null;
+              }
+              setShowComputerPage(false);
+              setComputerTask(null);
+              setComputerOutput(null);
+              setComputerPreviewUrl(null);
+              setComputerDownloadUrl(null);
+            }}
+            onRetry={handleRetryTask}
+            personaName={personaName}
+            outputContent={computerOutput?.content}
+            outputTitle={computerOutput?.title}
+            previewUrl={computerPreviewUrl}
+            downloadUrl={computerDownloadUrl}
+          />
+        )}
+      </AnimatePresence>
+
+      <div className="fixed bottom-28 left-0 right-0 px-8 z-30 pointer-events-none">
+        <AnimatePresence>
+          {tasks.map(task => (
+            <motion.div
+              key={task.id}
+              layout
+              initial={{ opacity: 0, y: 20, scale: 0.9 }}
+              animate={{
+                opacity: 1,
+                y: 0,
+                scale: 1,
+                backgroundColor: task.status === 'processing' ? 'rgba(208, 167, 139, 0.1)' : 'rgba(16, 185, 129, 0.15)',
+                borderColor: task.status === 'processing' ? 'rgba(208, 167, 139, 0.2)' : 'rgba(16, 185, 129, 0.3)',
+              }}
+              exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
+              transition={{ type: "spring", stiffness: 300, damping: 25 }}
+              className="mb-2 p-3 rounded-2xl border flex items-center gap-3 backdrop-blur-md shadow-lg overflow-hidden relative"
+            >
+              {task.status === 'completed' && (
+                <motion.div
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: [1, 2], opacity: [0.3, 0] }}
+                  transition={{ duration: 0.8, ease: "easeOut" }}
+                  className="absolute inset-0 bg-emerald-500/30 rounded-2xl pointer-events-none"
+                />
+              )}
+
+              {task.status === 'processing' ? (
+                <div className="relative flex-shrink-0">
+                  <Loader2 className="w-4 h-4 text-[#d0a78b] animate-spin" />
+                  <motion.div
+                    animate={{ scale: [1, 1.8], opacity: [0.5, 0] }}
+                    transition={{ duration: 1.5, repeat: Infinity, ease: "easeOut" }}
+                    className="absolute inset-0 bg-[#d0a78b]/50 rounded-full blur-[2px]"
+                  />
+                </div>
+              ) : (
+                <motion.div
+                  initial={{ scale: 0, rotate: -45 }}
+                  animate={{ scale: 1, rotate: 0 }}
+                  transition={{ type: "spring", stiffness: 500, damping: 15 }}
+                  className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0 shadow-[0_0_15px_rgba(16,185,129,0.4)] z-10"
+                >
+                  <Check className="w-3.5 h-3.5 text-black" strokeWidth={4} />
+                </motion.div>
+              )}
+
+              <div className="flex-1 truncate text-xs relative z-10">
+                <div className="flex items-center gap-1.5 overflow-hidden">
+                  <motion.span
+                    animate={{ color: task.status === 'processing' ? '#d0a78b' : '#10b981' }}
+                    className="font-mono uppercase font-bold"
+                  >
+                    {task.serviceName}
+                  </motion.span>
+                  <span className="text-gray-400 truncate">: {task.action}</span>
+                </div>
+                <motion.span
+                  animate={{ opacity: task.status === 'processing' ? 0.7 : 1 }}
+                  className="text-[10px] text-gray-500 block font-medium"
+                >
+                  {task.status === 'processing' ? 'Processing in background...' : 'Successfully completed'}
+                </motion.span>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
 
       <AnimatePresence>
         {showSettings && (
@@ -1436,6 +1626,7 @@ ${historyContext}
                 <button
                   onClick={() => setShowSettings(false)}
                   className="p-2 rounded-full hover:bg-white/5 text-gray-500"
+                  aria-label="Close Settings"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1465,7 +1656,7 @@ ${historyContext}
 
                   {!googleToken && (
                     <p className="text-[10px] text-gray-500 leading-relaxed uppercase tracking-tighter">
-                      Connect to enable Gmail, Calendar, Drive, and real-time task management capabilities.
+                      Connect to enable Gmail, Calendar, Drive, Tasks, and YouTube capabilities.
                     </p>
                   )}
                 </div>
@@ -1480,6 +1671,7 @@ ${historyContext}
                     onChange={(e) => setPersonaName(e.target.value)}
                     placeholder="e.g. Beatrice"
                     className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-amber-500/50 transition-colors text-white"
+                    aria-label="Persona Name"
                   />
                 </div>
 
@@ -1513,6 +1705,8 @@ ${historyContext}
                       value={contextSize}
                       onChange={(e) => setContextSize(parseInt(e.target.value))}
                       className="w-full accent-amber-500 h-1.5 bg-white/5 rounded-lg appearance-none cursor-pointer"
+                      aria-label="System Prompt Context Size"
+                      title="System Prompt Context Size"
                     />
                   </div>
 

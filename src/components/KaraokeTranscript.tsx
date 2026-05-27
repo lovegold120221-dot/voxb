@@ -27,14 +27,9 @@ export function KaraokeTranscript({ role, text, name }: { role: 'user' | 'model'
           {name}
         </span>
       )}
-      <div 
+      <div
         ref={scrollRef}
-        className="flex-1 overflow-x-hidden whitespace-nowrap py-4 flex scroll-smooth"
-        style={{
-           maskImage: 'linear-gradient(to right, transparent, black 15%, black 85%, transparent)',
-           WebkitMaskImage: 'linear-gradient(to right, transparent, black 15%, black 85%, transparent)',
-           justifyContent: role === 'user' ? 'flex-end' : 'flex-start'
-        }}
+        className={`flex-1 overflow-x-hidden whitespace-nowrap py-4 flex scroll-smooth transcript-mask ${role === 'user' ? 'justify-end' : 'justify-start'}`}
       >
         <div className="inline-flex items-center pr-[50%]">
           {words.map((word, i) => (

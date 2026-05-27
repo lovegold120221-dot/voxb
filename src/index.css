@@ -1,1 +1,30 @@
 @import "tailwindcss";
+
+@keyframes cloud-drift-1 {
+  0%, 100% { transform: translate(-15%, -15%) scale(1); }
+  50% { transform: translate(15%, 10%) scale(1.15); }
+}
+@keyframes cloud-drift-2 {
+  0%, 100% { transform: translate(15%, 15%) scale(1.1); }
+  50% { transform: translate(-10%, -15%) scale(0.9); }
+}
+@keyframes cloud-drift-3 {
+  0%, 100% { transform: translate(-10%, 20%) scale(0.95); }
+  50% { transform: translate(10%, -10%) scale(1.2); }
+}
+@keyframes orb-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.25; }
+  50% { transform: scale(1.05); opacity: 0.35; }
+}
+.blob-1 { animation: cloud-drift-1 12s ease-in-out infinite; }
+.blob-2 { animation: cloud-drift-2 14s ease-in-out infinite; }
+.blob-3 { animation: cloud-drift-3 10s ease-in-out infinite; }
+.orb-pulse-active { animation: orb-pulse 4s ease-in-out infinite; }
+.dot-pattern {
+  background-image: radial-gradient(circle, #f59e0b 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+.transcript-mask {
+  -webkit-mask-image: linear-gradient(to right, transparent, black 15%, black 85%, transparent);
+  mask-image: linear-gradient(to right, transparent, black 15%, black 85%, transparent);
+}
