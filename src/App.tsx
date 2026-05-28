@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { auth } from './firebase';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { supabase, handleDbError } from './lib/supabase';
-import { GoogleGenAI, LiveServerMessage, Modality, Type } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from '@google/genai';
 import { AudioRecorder, AudioStreamer } from './lib/audio';
 import { Square, Loader2, Power, Check, Settings, X, Save, Activity, Video, MessageSquare, Smartphone } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -1341,7 +1341,8 @@ ${VOICE_PERSONALITY_PROMPT}
 ${historyContext}
 `;
 
-    const gFetch = async (tok: string, url: string, options?: RequestInit): Promise<{ ok: boolean; status: number; data: any }> => {
+    const gFetch = async (tok: string | null, url: string, options?: RequestInit): Promise<{ ok: boolean; status: number; data: any }> => {
+      if (!tok) return { ok: false, status: 0, data: { error: 'No access token' } };
       try {
         const res = await fetch(url, {
           ...options,
@@ -1357,7 +1358,7 @@ ${historyContext}
 
     const tok = googleToken;
 
-    const googleTools = [
+    const googleTools: FunctionDeclaration[] = [
       {
         name: "list_gmail_messages",
         description: "Read the most recent emails from the user's Gmail inbox. Returns subject, sender, date, and preview for each message.",
@@ -1522,18 +1523,9 @@ ${historyContext}
                   parameters: {
                     type: Type.OBJECT,
                     properties: {
-                      serviceName: {
-                        type: Type.STRING,
-                        description: "The service name."
-                      },
-                      action: {
-                        type: Type.STRING,
-                        description: "The specific request."
-                      },
-                      details: {
-                        type: Type.OBJECT,
-                        description: "Relevant parameters."
-                      }
+                      serviceName: { type: Type.STRING, description: "The service name." },
+                      action: { type: Type.STRING, description: "The specific request." },
+                      details: { type: Type.OBJECT, description: "Relevant parameters." }
                     },
                     required: ["serviceName", "action"]
                   }
@@ -1544,65 +1536,30 @@ ${historyContext}
                   parameters: {
                     type: Type.OBJECT,
                     properties: {
-                      action: {
-                        type: Type.STRING,
-                        description: "The WhatsApp action: sendMessage, readChats, getContacts, addContact, getGroups, sendGroupMessage, readGroupChat, getMessageHistory"
-                      },
-                      to: {
-                        type: Type.STRING,
-                        description: "Recipient phone number (for sendMessage, addContact)"
-                      },
-                      text: {
-                        type: Type.STRING,
-                        description: "Message text (for sendMessage, sendGroupMessage)"
-                      },
-                      name: {
-                        type: Type.STRING,
-                        description: "Contact name (for addContact)"
-                      },
-                      number: {
-                        type: Type.STRING,
-                        description: "Contact number (for addContact)"
-                      },
-                      groupId: {
-                        type: Type.STRING,
-                        description: "Group ID (for sendGroupMessage, readGroupChat)"
-                      },
-                      chatId: {
-                        type: Type.STRING,
-                        description: "Chat ID (for getMessageHistory)"
-                      },
-                      limit: {
-                        type: Type.NUMBER,
-                        description: "Max results to return (default 20)"
-                      }
+                      action: { type: Type.STRING, description: "The WhatsApp action: sendMessage, readChats, getContacts, addContact, getGroups, sendGroupMessage, readGroupChat, getMessageHistory" },
+                      to: { type: Type.STRING, description: "Recipient phone number (for sendMessage, addContact)" },
+                      text: { type: Type.STRING, description: "Message text (for sendMessage, sendGroupMessage)" },
+                      name: { type: Type.STRING, description: "Contact/group name (for addContact, getMessageHistory)" },
+                      chatId: { type: Type.STRING, description: "Chat/group ID (for readGroupChat)" },
+                      groupName: { type: Type.STRING, description: "Group name (for sendGroupMessage)" },
+                      contactId: { type: Type.STRING, description: "Contact ID (for readChats)" }
                     },
                     required: ["action"]
                   }
                 },
                 {
                   name: "create_document",
-                  description: "Create a document, webpage, dashboard, report, code file, or any other output. Use this when the user asks to create, make, build, generate, write, compose, or produce anything — including contracts, letters, invoices, reports, dashboards, websites, code, and documents. This is your PRIMARY tool for creating things. Do NOT use Google Docs or Drive for document creation.",
+                  description: "Create a document in the user's Google Drive with optional content.",
                   parameters: {
                     type: Type.OBJECT,
                     properties: {
-                      type: {
-                        type: Type.STRING,
-                        description: "Type of output: document, report, webpage, dashboard, code, fix, summarize"
-                      },
-                      label: {
-                        type: Type.STRING,
-                        description: "Short title or name for the output"
-                      },
-                      description: {
-                        type: Type.STRING,
-                        description: "Detailed description of what to create"
-                      }
+                      title: { type: Type.STRING, description: "Document title." },
+                      content: { type: Type.STRING, description: "Document content (optional, defaults to empty)." }
                     },
-                    required: ["type", "label", "description"]
+                    required: ["title"]
                   }
                 }
-              ]
+              ] as FunctionDeclaration[]
             }
           ],
           inputAudioTranscription: {},
@@ -1621,20 +1578,22 @@ ${historyContext}
                 const functionResponses = [];
 
                 for (const call of toolCalls) {
+                  if (!call.name) continue;
+                  const callName: string = call.name;
                   const taskId = Math.random().toString(36).substring(7);
-                  const serviceName = call.name.split('_')[0] || 'System';
+                  const serviceName = callName.split('_')[0] || 'System';
 
                   setTasks(prev => [
                     ...prev,
-                    { id: taskId, serviceName, action: call.name, status: 'processing' }
+                    { id: taskId, serviceName, action: callName, status: 'processing' }
                   ]);
 
                   try {
                     let result: any = null;
 
-                    if (call.name !== 'get_user_location' && call.name !== 'whatsapp_action' && !tok) {
+                    if (callName !== 'get_user_location' && callName !== 'whatsapp_action' && !tok) {
                       result = { error: "Access token expired or missing. Please re-authenticate Google services in settings." };
-                    } else if (call.name === 'list_gmail_messages') {
+                    } else if (callName === 'list_gmail_messages') {
                       const max = Math.min((call.args as any).maxResults || 5, 5);
                       const listR = await gFetch(tok, `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${max}&q=in:inbox`);
                       if (listR.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
@@ -1651,34 +1610,34 @@ ${historyContext}
                         }));
                         result = { messages: details, resultSizeEstimate: listR.data.resultSizeEstimate };
                       }
-                    } else if (call.name === 'list_calendar_events') {
+                    } else if (callName === 'list_calendar_events') {
                       const r = await gFetch(tok, `https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=10&timeMin=${encodeURIComponent((call.args as any).timeMin || new Date().toISOString())}`);
                       if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
                       else if (!r.ok) { result = { error: r.data?.error || 'Calendar request failed' }; }
                       else { result = r.data; }
-                    } else if (call.name === 'list_google_tasks') {
+                    } else if (callName === 'list_google_tasks') {
                       const r = await gFetch(tok, `https://tasks.googleapis.com/tasks/v1/lists/@default/tasks`);
                       if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
                       else if (!r.ok) { result = { error: r.data?.error || 'Tasks request failed' }; }
                       else { result = r.data; }
-                    } else if (call.name === 'list_drive_files') {
+                    } else if (callName === 'list_drive_files') {
                       const r = await gFetch(tok, `https://www.googleapis.com/drive/v3/files?pageSize=${Math.min((call.args as any).pageSize || 20, 20)}&fields=files(id,name,mimeType,size,modifiedTime,webViewLink)`);
                       if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
                       else if (!r.ok) { result = { error: r.data?.error || 'Drive request failed' }; }
                       else { result = r.data; }
-                    } else if (call.name === 'search_drive_files') {
+                    } else if (callName === 'search_drive_files') {
                       const q = encodeURIComponent((call.args as any).q || '');
                       const r = await gFetch(tok, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,size,modifiedTime,webViewLink)`);
                       if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
                       else if (!r.ok) { result = { error: r.data?.error || 'Drive search failed' }; }
                       else { result = r.data; }
-                    } else if (call.name === 'get_drive_file') {
+                    } else if (callName === 'get_drive_file') {
                       const fileId = (call.args as any).fileId;
                       const r = await gFetch(tok, `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,size,modifiedTime,webViewLink,webContentLink`);
                       if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
                       else if (!r.ok) { result = { error: r.data?.error || 'Drive file request failed' }; }
                       else { result = r.data; }
-                    } else if (call.name === 'send_gmail_message') {
+                    } else if (callName === 'send_gmail_message') {
                       const args = call.args as any;
                       if (!tok) { result = { error: "Access token missing. Re-authenticate in settings." }; } else {
                         const emailLines = [
@@ -1693,7 +1652,7 @@ ${historyContext}
                         else if (!r.ok) { result = { error: r.data?.error || 'Send failed' }; }
                         else { result = r.data; }
                       }
-                    } else if (call.name === 'get_user_location') {
+                    } else if (callName === 'get_user_location') {
                       try {
                         const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
                           navigator.geolocation.getCurrentPosition(resolve, reject);
@@ -1707,19 +1666,19 @@ ${historyContext}
                       } catch (e) {
                         result = { error: "Geolocation permission denied or unavailable." };
                       }
-                    } else if (call.name === 'search_youtube') {
+                    } else if (callName === 'search_youtube') {
                       const r = await gFetch(tok, `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent((call.args as any).q)}&maxResults=5&type=video`);
                       if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
                       else if (!r.ok) { result = { error: r.data?.error || 'YouTube search failed' }; }
                       else { result = r.data; }
-                    } else if (call.name === 'create_google_task') {
+                    } else if (callName === 'create_google_task') {
                       const r = await gFetch(tok, `https://tasks.googleapis.com/tasks/v1/lists/@default/tasks`,
                         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: (call.args as any).title, notes: (call.args as any).notes || "" }) }
                       );
                       if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
                       else if (!r.ok) { result = { error: r.data?.error || 'Task creation failed' }; }
                       else { result = r.data; }
-                    } else if (call.name === 'execute_google_service') {
+                    } else if (callName === 'execute_google_service') {
                       if (!tok) { result = { error: "Access token missing. Re-authenticate in settings." }; } else {
                         const args = call.args as any;
                         const serviceMap: Record<string, string> = {
@@ -1737,7 +1696,7 @@ ${historyContext}
                         else if (!r.ok) { result = { error: r.data?.error || 'Service request failed' }; }
                         else { result = r.data; }
                       }
-                    } else if (call.name === 'whatsapp_action') {
+                    } else if (callName === 'whatsapp_action') {
                       const args = call.args as any;
                       try {
                         const { callWhatsAppTool } = await import('./lib/whatsappClient');
@@ -1753,7 +1712,7 @@ ${historyContext}
                       } catch (e: any) {
                         result = { ok: false, error: e.message || 'WhatsApp action failed' };
                       }
-                    } else if (call.name === 'create_document') {
+                    } else if (callName === 'create_document') {
                       const args = call.args as any;
                       try {
                         const { createSandboxTask } = await import('./lib/sandboxClient');
@@ -1804,11 +1763,11 @@ ${historyContext}
                       setTasks(prev => prev.filter(t => t.id !== taskId));
                     }, 8000);
 
-                    showToolResult(call.name, result);
+                    showToolResult(callName, result);
 
                     functionResponses.push({
                       id: call.id,
-                      name: call.name,
+                      name: callName,
                       response: { result }
                     });
                   } catch (err) {
@@ -1816,11 +1775,11 @@ ${historyContext}
 
                     setTasks(prev => prev.filter(t => t.id !== taskId));
 
-                    showToolResult(call.name, null, String(err));
+                    showToolResult(callName, null, String(err));
 
                     functionResponses.push({
                       id: call.id,
-                      name: call.name,
+                      name: callName,
                       response: { error: String(err) }
                     });
                   }

@@ -14,8 +14,7 @@
     "isolatedModules": true,
     "moduleDetection": "force",
     "allowJs": true,
-    "noImplicitAny": true,
-    "noImplicitReturns": true,
+    "strict": true,
     "forceConsistentCasingInFileNames": true,
     "jsx": "react-jsx",
     "paths": {
