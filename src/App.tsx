@@ -757,7 +757,7 @@ function MaximusAgent({
   const breathLevel = useMemo(() => {
     if (volumes.length === 0) return 0;
     const avg = volumes.reduce((a, b) => a + b, 0) / volumes.length;
-    return Math.pow(Math.min(1, avg * 1.5), 0.8);
+    return Math.pow(Math.min(1, avg * 2), 0.7);
   }, [volumes]);
 
   const aiRef = useRef<GoogleGenAI | null>(null);
@@ -1109,14 +1109,14 @@ function MaximusAgent({
 
   useEffect(() => {
     let animationFrame: number;
-    const cloudPuffs = Array.from({ length: 10 }, (_, i) => ({
-      cx: 0.2 + Math.random() * 0.6,
-      cy: 0.2 + Math.random() * 0.6,
-      r: 0.12 + Math.random() * 0.2,
+    const cloudPuffs = Array.from({ length: 14 }, (_, i) => ({
+      cx: 0.15 + Math.random() * 0.7,
+      cy: 0.15 + Math.random() * 0.7,
+      r: 0.08 + Math.random() * 0.18,
       phaseX: Math.random() * Math.PI * 2,
       phaseY: Math.random() * Math.PI * 2,
-      speedX: 0.15 + Math.random() * 0.25,
-      speedY: 0.12 + Math.random() * 0.2,
+      speedX: 0.25 + Math.random() * 0.4,
+      speedY: 0.2 + Math.random() * 0.35,
     }));
 
     const drawClouds = (canvas: HTMLCanvasElement | null, avg: number, peak: number, size: number, puffs: typeof cloudPuffs) => {
@@ -1133,21 +1133,21 @@ function MaximusAgent({
       ctx.clearRect(0, 0, w, h);
 
       const time = Date.now() / 1000;
-      const boost = 1 + avg * 0.8 + peak * 0.6;
+      const boost = 1 + avg * 1.5 + peak * 1.2;
 
       puffs.forEach((puff) => {
-        const driftX = Math.sin(time * puff.speedX + puff.phaseX) * 0.12;
-        const driftY = Math.cos(time * puff.speedY + puff.phaseY) * 0.1;
+        const driftX = Math.sin(time * puff.speedX + puff.phaseX) * 0.15;
+        const driftY = Math.cos(time * puff.speedY + puff.phaseY) * 0.12;
         const x = (puff.cx + driftX) * w;
         const y = (puff.cy + driftY) * h;
         const baseR = puff.r * w * 0.45;
         const r = baseR * boost;
 
-        const alpha = 0.12 + avg * 0.35 + peak * 0.2;
+        const alpha = 0.08 + avg * 0.5 + peak * 0.3;
         const gradient = ctx.createRadialGradient(x, y, 0, x, y, r);
-        gradient.addColorStop(0, `rgba(208, 167, 139, ${Math.min(1, alpha * 1.5)})`);
-        gradient.addColorStop(0.4, `rgba(208, 167, 139, ${Math.min(1, alpha * 0.8)})`);
-        gradient.addColorStop(0.7, `rgba(208, 167, 139, ${Math.min(1, alpha * 0.3)})`);
+        gradient.addColorStop(0, `rgba(208, 167, 139, ${Math.min(1, alpha * 2)})`);
+        gradient.addColorStop(0.3, `rgba(208, 167, 139, ${Math.min(1, alpha * 1.2)})`);
+        gradient.addColorStop(0.6, `rgba(208, 167, 139, ${Math.min(1, alpha * 0.5)})`);
         gradient.addColorStop(1, 'rgba(208, 167, 139, 0)');
 
         ctx.beginPath();
@@ -1155,67 +1155,6 @@ function MaximusAgent({
         ctx.arc(x, y, r, 0, Math.PI * 2);
         ctx.fill();
       });
-    };
-
-    const drawWaveform = (canvas: HTMLCanvasElement | null, freqs: number[]) => {
-      if (!canvas) return;
-      const dpr = window.devicePixelRatio || 1;
-      const size = 144;
-      const w = size * dpr;
-      const h = size * dpr;
-      if (canvas.width !== w || canvas.height !== h) {
-        canvas.width = w;
-        canvas.height = h;
-      }
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.clearRect(0, 0, w, h);
-
-      const cx = w / 2;
-      const cy = h / 2;
-      const radius = w * 0.32;
-      const numBars = 24;
-      const barWidth = 2.5 * dpr;
-      const barGap = 4 * dpr;
-
-      const interpolate = (arr: number[], idx: number) => {
-        const pos = (idx / numBars) * arr.length;
-        const i = Math.floor(pos);
-        const frac = pos - i;
-        const a = arr[Math.min(i, arr.length - 1)] || 0;
-        const b = arr[Math.min(i + 1, arr.length - 1)] || 0;
-        return a + (b - a) * frac;
-      };
-
-      for (let i = 0; i < numBars; i++) {
-        const angle = (i / numBars) * Math.PI * 2 - Math.PI / 2;
-        const val = interpolate(freqs, i);
-        const barHeight = 4 * dpr + val * radius * 0.7;
-
-        const innerR = radius - barHeight;
-        const outerR = radius;
-
-        const x1 = cx + Math.cos(angle) * innerR;
-        const y1 = cy + Math.sin(angle) * innerR;
-        const x2 = cx + Math.cos(angle) * outerR;
-        const y2 = cy + Math.sin(angle) * outerR;
-
-        const perpAngle = angle + Math.PI / 2;
-        const hw = (barWidth / 2);
-        const cosP = Math.cos(perpAngle) * hw;
-        const sinP = Math.sin(perpAngle) * hw;
-
-        ctx.beginPath();
-        ctx.moveTo(x1 + cosP, y1 + sinP);
-        ctx.lineTo(x2 + cosP, y2 + sinP);
-        ctx.lineTo(x2 - cosP, y2 - sinP);
-        ctx.lineTo(x1 - cosP, y1 - sinP);
-        ctx.closePath();
-
-        const alpha = 0.2 + val * 0.8;
-        ctx.fillStyle = `rgba(208, 167, 139, ${alpha})`;
-        ctx.fill();
-      }
     };
 
     const updateVolumes = () => {
@@ -1231,17 +1170,14 @@ function MaximusAgent({
 
         const avg = streamerVols.reduce((a, b) => a + b, 0) / streamerVols.length;
         const peak = Math.max(...streamerVols);
-        drawClouds(cloudCanvasRef.current, avg, peak, 208, cloudPuffs);
         const recAvg = recorderVols.reduce((a, b) => a + b, 0) / recorderVols.length;
         const recPeak = Math.max(...recorderVols);
-        drawClouds(miniCloudCanvasRef.current, recAvg, recPeak, 80, cloudPuffs);
-        const combinedFreqs = streamerVols.map((v, i) => Math.max(v, recorderVols[i] || 0));
-        drawWaveform(waveformCanvasRef.current, combinedFreqs);
+        const combinedAvg = (avg + recAvg) / 2;
+        const combinedPeak = Math.max(peak, recPeak);
+        drawClouds(cloudCanvasRef.current, combinedAvg, combinedPeak, 256, cloudPuffs);
       } else {
         setVolumes(prev => prev.map(v => v + (0.05 - v) * 0.2));
-        drawClouds(cloudCanvasRef.current, 0.05, 0.05, 208, cloudPuffs);
-        drawClouds(miniCloudCanvasRef.current, 0.05, 0.05, 80, cloudPuffs);
-        drawWaveform(waveformCanvasRef.current, Array(11).fill(0.05));
+        drawClouds(cloudCanvasRef.current, 0.05, 0.05, 256, cloudPuffs);
       }
 
       animationFrame = requestAnimationFrame(updateVolumes);
@@ -2231,9 +2167,9 @@ ${historyContext}
           {isActive ? 'Beatrice is listening...' : connecting ? 'Connecting...' : 'Beatrice is offline. Connect to begin.'}
         </p>
 
-        <div className="relative flex items-center justify-center w-full h-[200px] sm:h-[260px]">
+        <div className="relative flex items-center justify-center w-full h-[240px] sm:h-[320px]">
           <div
-            className={`absolute w-48 h-48 sm:w-64 sm:h-64 rounded-full blur-3xl transition-none`}
+            className={`absolute w-64 h-64 sm:w-80 sm:h-80 rounded-full blur-3xl transition-none`}
             style={{
               background: isActive
                 ? `radial-gradient(circle, rgba(208,167,139,${0.12 + breathLevel * 0.38}) 0%, transparent 70%)`
@@ -2245,30 +2181,24 @@ ${historyContext}
           <button
             onClick={isActive ? stopSession : startSession}
             disabled={connecting}
-            className="relative w-36 h-36 sm:w-48 sm:h-48 rounded-full bg-[#1c1614]/60 border border-[#d0a78b]/20 overflow-hidden flex items-center justify-center transition-all duration-500 hover:border-[#d0a78b] hover:shadow-[0_0_55px_rgba(208,167,139,0.3)] active:scale-[0.98]"
+            className="relative w-48 h-48 sm:w-64 sm:h-64 rounded-full bg-[#1c1614]/60 border border-[#d0a78b]/20 overflow-hidden flex items-center justify-center transition-all duration-500 hover:border-[#d0a78b] hover:shadow-[0_0_55px_rgba(208,167,139,0.3)] active:scale-[0.98]"
             aria-label="Toggle Voice Assistant"
           >
             <div className="absolute inset-0 bg-black/5 backdrop-blur-[12px] z-10 rounded-full pointer-events-none" />
 
             <div className="absolute inset-0 w-full h-full flex items-center justify-center transition-transform duration-100 ease-out z-0">
-              <div className="blob-1 absolute w-32 h-32 sm:w-44 sm:h-44 rounded-full bg-[radial-gradient(circle,rgba(208,167,139,0.65)_0%,transparent_70%)] blur-md" />
-              <div className="blob-2 absolute w-28 h-28 sm:w-40 sm:h-40 rounded-full bg-[radial-gradient(circle,rgba(171,123,96,0.45)_0%,transparent_70%)] blur-md" />
-              <div className="blob-3 absolute w-24 h-24 sm:w-36 sm:h-36 rounded-full bg-[radial-gradient(circle,rgba(235,208,188,0.55)_0%,transparent_70%)] blur-md" />
-              <div className="absolute w-10 h-10 sm:w-14 sm:h-14 rounded-full bg-[#d0a78b]/15 blur-xl" />
+              <div className="blob-1 absolute w-40 h-40 sm:w-56 sm:h-56 rounded-full bg-[radial-gradient(circle,rgba(208,167,139,0.65)_0%,transparent_70%)] blur-md" />
+              <div className="blob-2 absolute w-36 h-36 sm:w-52 sm:h-52 rounded-full bg-[radial-gradient(circle,rgba(171,123,96,0.45)_0%,transparent_70%)] blur-md" />
+              <div className="blob-3 absolute w-32 h-32 sm:w-48 sm:h-48 rounded-full bg-[radial-gradient(circle,rgba(235,208,188,0.55)_0%,transparent_70%)] blur-md" />
+              <div className="absolute w-14 h-14 sm:w-20 sm:h-20 rounded-full bg-[#d0a78b]/15 blur-xl" />
             </div>
 
             <div className="absolute inset-0 z-20 rounded-full flex items-center justify-center overflow-hidden">
               <canvas
-                ref={waveformCanvasRef}
-                className="absolute inset-0 w-full h-full pointer-events-none"
-                width={144}
-                height={144}
-              />
-              <canvas
                 ref={cloudCanvasRef}
                 className="absolute inset-0 w-full h-full pointer-events-none"
-                width={144}
-                height={144}
+                width={256}
+                height={256}
               />
               {connecting ? (
                 <Loader2 className="w-7 h-7 sm:w-9 sm:h-9 animate-spin text-[#d0a78b] z-10" />
@@ -2322,13 +2252,7 @@ ${historyContext}
             {connecting ? (
               <Loader2 className="w-5 h-5 sm:w-7 sm:h-7 animate-spin" />
             ) : isActive ? (
-              <div className="absolute inset-0 rounded-full overflow-hidden flex items-center justify-center">
-                <canvas
-                  ref={miniCloudCanvasRef}
-                  className="absolute inset-0 w-full h-full pointer-events-none"
-                  width={56}
-                  height={56}
-                />
+              <div className="absolute inset-0 rounded-full flex items-center justify-center">
                 <span className="text-[7px] sm:text-[9px] font-extrabold uppercase tracking-widest z-10 text-[#d0a78b]">
                   Stop
                 </span>
