@@ -896,11 +896,6 @@ function MaximusAgent({
     if (!intent) return;
 
     try {
-      sendTextToLive(
-        `The Boss wants me to create a ${intent.type}: "${intent.label}". Acknowledge it briefly and say you're working on it now — keep it natural, like a capable assistant.`
-      );
-      await new Promise(r => setTimeout(r, 1200));
-
       const { taskId, task } = await createSandboxTask(intent.type, intent.label, text, user?.email || undefined, user?.uid || undefined, historyContextRef.current);
       activeTaskIdRef.current = taskId;
       setComputerTask(task);
@@ -987,7 +982,7 @@ function MaximusAgent({
 
     userTranscriptRef.current = text;
     setUserTranscript(text);
-    setMessages(prev => [...prev, { role: 'user', text, timestamp: new Date().toISOString() }]);
+    setMessages(prev => [...prev, { role: 'user', text, timestamp: new Date().toISOString(), sessionId: sessionIdRef.current }]);
     saveMessage('user', text);
     sendTextToLive(text);
     tryTriggerComputerTask(text);
@@ -1584,6 +1579,28 @@ ${historyContext}
                     },
                     required: ["action"]
                   }
+                },
+                {
+                  name: "create_document",
+                  description: "Create a document, webpage, dashboard, report, code file, or any other output. Use this when the user asks to create, make, build, generate, write, compose, or produce anything — including contracts, letters, invoices, reports, dashboards, websites, code, and documents. This is your PRIMARY tool for creating things. Do NOT use Google Docs or Drive for document creation.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      type: {
+                        type: Type.STRING,
+                        description: "Type of output: document, report, webpage, dashboard, code, fix, summarize"
+                      },
+                      label: {
+                        type: Type.STRING,
+                        description: "Short title or name for the output"
+                      },
+                      description: {
+                        type: Type.STRING,
+                        description: "Detailed description of what to create"
+                      }
+                    },
+                    required: ["type", "label", "description"]
+                  }
                 }
               ]
             }
@@ -1736,6 +1753,47 @@ ${historyContext}
                       } catch (e: any) {
                         result = { ok: false, error: e.message || 'WhatsApp action failed' };
                       }
+                    } else if (call.name === 'create_document') {
+                      const args = call.args as any;
+                      try {
+                        const { createSandboxTask } = await import('./lib/sandboxClient');
+                        const { taskId, task } = await createSandboxTask(
+                          args.type || 'document',
+                          args.label || args.description?.slice(0, 40) || 'Document',
+                          args.description || args.label || '',
+                          user?.email || undefined,
+                          user?.uid || undefined,
+                          historyContextRef.current,
+                        );
+                        activeTaskIdRef.current = taskId;
+                        setComputerTask(task);
+                        setComputerOutput(null);
+                        setComputerPreviewUrl(null);
+                        setComputerDownloadUrl(null);
+                        setShowComputerPage(true);
+                        pollTaskStatus(
+                          taskId,
+                          (updatedTask, previewUrl, downloadUrl) => {
+                            setComputerTask(updatedTask);
+                            if (previewUrl) setComputerPreviewUrl(previewUrl);
+                            if (downloadUrl) setComputerDownloadUrl(downloadUrl);
+                          },
+                          (finalTask, output, previewUrl, downloadUrl) => {
+                            setComputerTask(finalTask);
+                            setComputerOutput(output ? { content: output.content, title: output.title } : null);
+                            if (previewUrl) setComputerPreviewUrl(previewUrl);
+                            if (downloadUrl) setComputerDownloadUrl(downloadUrl);
+                            activeTaskIdRef.current = null;
+                          },
+                          (error) => {
+                            result = { error };
+                            activeTaskIdRef.current = null;
+                          },
+                        );
+                        result = { ok: true, taskId };
+                      } catch (e: any) {
+                        result = { ok: false, error: e.message || 'Document creation failed' };
+                      }
                     }
 
                     setTasks(prev =>
@@ -1866,7 +1924,7 @@ ${historyContext}
                   const current = modelTranscriptRef.current;
 
                   if (current) {
-                    setMessages(prev => [...prev, { role: 'model', text: current, timestamp: new Date().toISOString() }]);
+                    setMessages(prev => [...prev, { role: 'model', text: current, timestamp: new Date().toISOString(), sessionId: sessionIdRef.current }]);
                     saveMessage('model', current);
                     modelTranscriptRef.current = '';
                   }
