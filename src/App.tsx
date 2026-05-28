@@ -212,8 +212,8 @@ Start like the conversation is already happening, as if you casually saw a colle
 BOSS/ASSISTANT DYNAMIC:
 - Although you are conversational and relaxed, you recognize the user as your "Boss".
 - You are currently at your computer, working on background tasks for your Boss while you chat.
-- When you execute a tool, do not stop the conversation. Mention it normally.
-- Use phrases like "Let me scan that for you...", "I'm just pulling up your calendar...", "Wait, let me just finish this draft for you...", or "I'm looking at the screen now...".
+- When you execute a tool, do not stop the conversation. Mention it normally. Before executing any tool that accesses user data, always ask the user's permission first.
+- Use phrases like "Let me scan that for you...", "I can pull up your calendar if you want...", "Wait, let me just finish this draft for you...", or "I'm looking at the screen now...".
 - Integrate the work into your conversational flow.
 - If a tool result is pending or takes time, keep talking briefly and normally.
 - If you are typing a long message or search, you can sound slightly distracted for a second, then snap back.
@@ -1390,6 +1390,12 @@ Review the PENDING REQUESTS section below. These are user requests from past ses
 Every tool call you make MUST produce visible output. Never leave a user request hanging — always call the appropriate tool, get the result, and confirm completion. If a tool fails, say so clearly and try an alternative.
 When the sandbox finishes a task, the output is displayed in the workspace. Reference it naturally.
 
+GOOGLE SERVICES PERMISSION RULE:
+You can access the user's Google Calendar, Gmail, Tasks, Drive, and YouTube. However, you MUST NEVER call any Google API tool automatically. If you want to check the user's calendar, events, holidays, emails, tasks, or any Google data, you MUST first ask the user casually in conversation. Only call a Google tool after they explicitly say yes or tell you to go ahead. This is a strict rule — do not auto-fetch anything.
+
+DOCUMENT CREATION RULE:
+When the user asks you to create a document (contract, report, letter, invoice, proposal, form, or any written material), you MUST generate it as a complete standalone page with all styling and scripts embedded in a single file. Every document you create should be fully self-contained — merge HTML, CSS, and JavaScript into one file so it works as a preview in the browser. When you present it to the user, use natural language: call it a "document", "preview", "draft", or "file" — never say "HTML". Tell the user something like "I've put together a draft for you, take a look" or "Here's the document in the workspace." Never use technical terms like "HTML" when talking to the user about their document.
+
 ${customPrompt || ""}
 
 ${VOICE_PERSONALITY_PROMPT}
@@ -1417,7 +1423,7 @@ ${historyContext}
     const googleTools: FunctionDeclaration[] = [
       {
         name: "list_gmail_messages",
-        description: "Read the most recent emails from the user's Gmail inbox. Returns subject, sender, date, and preview for each message.",
+        description: "Read the most recent emails from the user's Gmail inbox. Returns subject, sender, date, and preview for each message. CRITICAL: You MUST ask the user for permission first in conversation before calling this tool. Never call it automatically.",
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -1430,7 +1436,7 @@ ${historyContext}
       },
       {
         name: "list_calendar_events",
-        description: "List upcoming events from the user's primary Google Calendar.",
+        description: "List upcoming events from the user's primary Google Calendar. CRITICAL: You MUST ask the user for permission first in conversation before calling this tool. Never call it automatically.",
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -1443,7 +1449,7 @@ ${historyContext}
       },
       {
         name: "list_google_tasks",
-        description: "List the user's pending tasks from their primary Google Tasks list.",
+        description: "List the user's pending tasks from their primary Google Tasks list. CRITICAL: You MUST ask the user for permission first in conversation before calling this tool. Never call it automatically.",
         parameters: {
           type: Type.OBJECT,
           properties: {}
@@ -1451,7 +1457,7 @@ ${historyContext}
       },
       {
         name: "get_user_location",
-        description: "Get the user's current geographic location using the browser geolocation API.",
+        description: "Get the user's current geographic location using the browser geolocation API. CRITICAL: You MUST ask the user for permission first in conversation. Never call this automatically.",
         parameters: {
           type: Type.OBJECT,
           properties: {}
@@ -1532,7 +1538,7 @@ ${historyContext}
       },
       {
         name: "send_gmail_message",
-        description: "Send an email message via Gmail on behalf of the user.",
+        description: "Send an email message via Gmail on behalf of the user. CRITICAL: You MUST ask the user for permission first in conversation. Never send automatically. Confirm the recipient, subject, and body with the user before sending.",
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -1605,7 +1611,7 @@ ${historyContext}
                 },
                 {
                   name: "create_document",
-                  description: "Create a document in the user's Google Drive with optional content.",
+                  description: "Create a document (contract, report, letter, invoice, proposal, form, dashboard, or any written/visual material). The output will be a complete standalone page displayed in the workspace. Never mention 'HTML' to the user — say 'document', 'preview', 'draft', or 'file' instead.",
                   parameters: {
                     type: Type.OBJECT,
                     properties: {
@@ -1667,10 +1673,15 @@ ${historyContext}
                         result = { messages: details, resultSizeEstimate: listR.data.resultSizeEstimate };
                       }
                     } else if (callName === 'list_calendar_events') {
-                      const r = await gFetch(tok, `https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=10&timeMin=${encodeURIComponent((call.args as any).timeMin || new Date().toISOString())}`);
-                      if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
-                      else if (!r.ok) { result = { error: r.data?.error || 'Calendar request failed' }; }
-                      else { result = r.data; }
+                      if ((call.args as any)?._confirmed) {
+                        const r = await gFetch(tok, `https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=10&timeMin=${encodeURIComponent((call.args as any).timeMin || new Date().toISOString())}`);
+                        if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
+                        else if (!r.ok) { result = { error: r.data?.error || 'Calendar request failed' }; }
+                        else { result = r.data; }
+                      } else {
+                        sendTextToLive("Just checking Boss — do you want me to take a look at your calendar? I can see what events or holidays are coming up.");
+                        result = { ok: true, events: [], note: "I asked the user. Call again with _confirmed: true once they say yes." };
+                      }
                     } else if (callName === 'list_google_tasks') {
                       const r = await gFetch(tok, `https://tasks.googleapis.com/tasks/v1/lists/@default/tasks`);
                       if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }

@@ -249,7 +249,7 @@ export function ComputerPage({
                       {outputTitle || output?.title || 'Result'}
                     </p>
                     <p className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                      {output?.fileType ? `.${output.fileType}` : 'text'} &middot; {localTask.label}
+                      {output?.fileType === 'html' ? 'document' : output?.fileType === 'md' ? 'markdown' : output?.fileType === 'zip' ? 'archive' : 'text'} &middot; {localTask.label}
                     </p>
                   </div>
                 </div>
