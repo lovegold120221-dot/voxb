@@ -725,6 +725,16 @@ function MaximusAgent({
   const [userTitle, setUserTitle] = useState(() => {
     try { return localStorage.getItem('beatrice_userTitle') || 'Boss'; } catch { return 'Boss'; }
   });
+  const firstName = user?.displayName?.split(' ')[0] || '';
+
+  // Sync userTitle default with firstName when user loads
+  useEffect(() => {
+    if (firstName && !localStorage.getItem('beatrice_userTitle')) {
+      const defaultAddr = `Boss ${firstName}`;
+      setUserTitle(defaultAddr);
+      try { localStorage.setItem('beatrice_userTitle', defaultAddr); } catch {}
+    }
+  }, [firstName]);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [showProfilePage, setShowProfilePage] = useState(false);
@@ -1373,9 +1383,9 @@ function MaximusAgent({
 Visible conversation name: ${personaName}.
 User language: ${authLanguage}.
 
-Address the user as "${userTitle} ${user.displayName?.split(' ')[0] || 'Commander'}".
-Always greet and refer to them using this title followed by their first name.
-CRITICAL: Never call them by anything else — their title is ${userTitle}, their name is ${user.displayName?.split(' ')[0] || 'Commander'}.
+Address the user as "${userTitle}".
+Always greet and refer to them using this name.
+CRITICAL: Never call them by anything else — this is what they want to be called.
 
 The visible name is only a label. Do not build the personality around it.
 The voice personality is controlled by VOICE_PERSONALITY_PROMPT.
@@ -2547,7 +2557,7 @@ ${historyContext}
                     aria-label="User Title"
                   />
                   <p className="text-[9px] text-zinc-600 ml-1">
-                    Beatrice will call you "{userTitle} {user.displayName?.split(' ')[0] || 'YourName'}"
+                    Beatrice will call you &ldquo;{userTitle}&rdquo;
                   </p>
                 </div>
 
