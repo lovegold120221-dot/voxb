@@ -768,6 +768,7 @@ function MaximusAgent({
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
   const audioRecorderRef = useRef<AudioRecorder | null>(null);
   const cloudCanvasRef = useRef<HTMLCanvasElement>(null);
+  const stopCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1157,6 +1158,46 @@ function MaximusAgent({
       });
     };
 
+    const drawStopBars = (canvas: HTMLCanvasElement | null, vols: number[]) => {
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      const dpr = window.devicePixelRatio || 1;
+      const size = 80;
+      const w = size * dpr;
+      const h = size * dpr;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+      ctx.clearRect(0, 0, w, h);
+
+      const cx = w / 2;
+      const cy = h / 2;
+      const num = 8;
+      const maxR = w * 0.35;
+      const avg = vols.reduce((a, b) => a + b, 0) / vols.length;
+
+      for (let i = 0; i < num; i++) {
+        const angle = (i / num) * Math.PI * 2 - Math.PI / 2;
+        const val = vols[Math.floor((i / num) * vols.length)] || 0;
+        const len = 4 * dpr + val * maxR * 1.2;
+        const inner = maxR - len;
+        const x1 = cx + Math.cos(angle) * inner;
+        const y1 = cy + Math.sin(angle) * inner;
+        const x2 = cx + Math.cos(angle) * maxR;
+        const y2 = cy + Math.sin(angle) * maxR;
+
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(208, 167, 139, ${0.3 + avg * 0.7})`;
+        ctx.lineWidth = 2.5 * dpr;
+        ctx.lineCap = 'round';
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+    };
+
     const updateVolumes = () => {
       if (isActive && audioStreamerRef.current && audioRecorderRef.current) {
         const streamerVols = audioStreamerRef.current.getFrequencies(11);
@@ -1175,9 +1216,11 @@ function MaximusAgent({
         const combinedAvg = (avg + recAvg) / 2;
         const combinedPeak = Math.max(peak, recPeak);
         drawClouds(cloudCanvasRef.current, combinedAvg, combinedPeak, 256, cloudPuffs);
+        drawStopBars(stopCanvasRef.current, recorderVols);
       } else {
         setVolumes(prev => prev.map(v => v + (0.05 - v) * 0.2));
         drawClouds(cloudCanvasRef.current, 0.05, 0.05, 256, cloudPuffs);
+        drawStopBars(stopCanvasRef.current, Array(11).fill(0));
       }
 
       animationFrame = requestAnimationFrame(updateVolumes);
@@ -2255,6 +2298,12 @@ ${historyContext}
               <Loader2 className="w-5 h-5 sm:w-7 sm:h-7 animate-spin" />
             ) : isActive ? (
               <div className="absolute inset-0 rounded-full flex items-center justify-center">
+                <canvas
+                  ref={stopCanvasRef}
+                  className="absolute inset-0 w-full h-full pointer-events-none"
+                  width={80}
+                  height={80}
+                />
                 <span className="text-[7px] sm:text-[9px] font-extrabold uppercase tracking-widest z-10 text-[#d0a78b]">
                   Stop
                 </span>
