@@ -5,6 +5,8 @@ import fs from 'fs';
 import { randomBytes } from 'crypto';
 import { SandboxManager } from './sandbox';
 import { EburonWorker } from './eburon';
+import { WhatsAppManager } from './whatsapp';
+import * as waTools from './whatsapp-tools';
 import type { TaskRequest, TaskStatusResponse } from './types';
 
 const app = express();
@@ -19,6 +21,7 @@ app.use(express.json({ limit: '10mb' }));
 
 const sandbox = new SandboxManager(SANDBOX_ROOT);
 const worker = new EburonWorker(OLLAMA_URL, OLLAMA_MODEL, OLLAMA_FALLBACK);
+const waManager = new WhatsAppManager();
 
 app.use('/sandbox', express.static(SANDBOX_ROOT, {
   setHeaders(res, filePath) {
@@ -186,6 +189,97 @@ async function runTask(taskId: string, type: string, prompt: string, userEmail?:
 function delay(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+// ── WhatsApp Routes ──
+
+app.post('/api/whatsapp/pair', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) { res.status(400).json({ error: 'userId required' }); return; }
+    const result = await waManager.startPairing(userId);
+    if ('error' in result) { res.status(500).json(result); return; }
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Pairing failed' });
+  }
+});
+
+app.get('/api/whatsapp/status/:userId', (req, res) => {
+  const status = waManager.getStatus(req.params.userId);
+  if (!status) { res.json({ status: 'not_found' }); return; }
+  res.json(status);
+});
+
+app.post('/api/whatsapp/disconnect', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) { res.status(400).json({ error: 'userId required' }); return; }
+    await waManager.disconnect(userId);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/whatsapp/send', async (req, res) => {
+  try {
+    const { userId, to, text } = req.body;
+    if (!userId || !to || !text) { res.status(400).json({ error: 'userId, to, text required' }); return; }
+    const result = await waTools.handleSendMessage(waManager, userId, undefined, to, text);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/whatsapp/tool', async (req, res) => {
+  try {
+    const { userId, tool, params, permissions } = req.body;
+    if (!userId || !tool) { res.status(400).json({ error: 'userId and tool required' }); return; }
+
+    let result: any;
+    switch (tool) {
+      case 'sendMessage':
+        result = await waTools.handleSendMessage(waManager, userId, permissions, params.to, params.text);
+        break;
+      case 'readChats':
+        result = await waTools.handleReadChats(waManager, userId, permissions, params.limit);
+        break;
+      case 'getContacts':
+        result = await waTools.handleGetContacts(waManager, userId, permissions);
+        break;
+      case 'addContact':
+        result = await waTools.handleAddContact(waManager, userId, permissions, params.name, params.number);
+        break;
+      case 'getGroups':
+        result = await waTools.handleGetGroups(waManager, userId, permissions);
+        break;
+      case 'sendGroupMessage':
+        result = await waTools.handleSendGroupMessage(waManager, userId, permissions, params.groupId, params.text);
+        break;
+      case 'readGroupChat':
+        result = await waTools.handleReadGroupChat(waManager, userId, permissions, params.groupId, params.limit);
+        break;
+      case 'getMessageHistory':
+        result = await waTools.handleGetMessageHistory(waManager, userId, permissions, params.chatId, params.limit);
+        break;
+      default:
+        res.status(400).json({ error: `Unknown tool: ${tool}` });
+        return;
+    }
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Shutdown hook ──
+
+process.on('SIGTERM', async () => {
+  console.log('Shutting down WhatsApp clients...');
+  await waManager.shutdown();
+  process.exit(0);
+});
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' });

@@ -4,14 +4,16 @@ import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut,
 import { supabase, handleDbError } from './lib/supabase';
 import { GoogleGenAI, LiveServerMessage, Modality, Type } from '@google/genai';
 import { AudioRecorder, AudioStreamer } from './lib/audio';
-import { Square, Loader2, Power, Check, Settings, X, Save, Activity, Video, MessageSquare } from 'lucide-react';
+import { Square, Loader2, Power, Check, Settings, X, Save, Activity, Video, MessageSquare, Smartphone } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { KaraokeTranscript } from './components/KaraokeTranscript';
 import { ChatPage } from './components/ChatPage';
 import { VideoPage } from './components/VideoPage';
 import { ComputerPage } from './components/ComputerPage';
+import { ProfilePage } from './components/ProfilePage';
 import { detectExecutionIntent } from './lib/executionDetector';
 import { createSandboxTask, pollTaskStatus, stopPolling, retryTask } from './lib/sandboxClient';
+import { startWhatsAppPairing, getWhatsAppStatus, disconnectWhatsApp } from './lib/whatsappClient';
 import type { ComputerTask } from './lib/executionDetector';
 
 const LANGUAGES = [
@@ -607,7 +609,8 @@ function MaximusAgent({
 
   const [tasks, setTasks] = useState<ActionTask[]>([]);
   const [historyContext, setHistoryContext] = useState<string>("");
-  const [currentTranscript, setCurrentTranscript] = useState<{ role: 'user' | 'model'; text: string } | null>(null);
+  const [userTranscript, setUserTranscript] = useState<string>('');
+  const [modelTranscript, setModelTranscript] = useState<string>('');
 
   const [showSettings, setShowSettings] = useState(false);
   const [showComputerPage, setShowComputerPage] = useState(false);
@@ -621,6 +624,23 @@ function MaximusAgent({
   const [contextSize, setContextSize] = useState(20);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [showProfilePage, setShowProfilePage] = useState(false);
+  const [waStatus, setWaStatus] = useState<string>('not_found');
+  const [waQrCode, setWaQrCode] = useState<string | null>(null);
+  const [waPhone, setWaPhone] = useState<string | null>(null);
+  const [waPairing, setWaPairing] = useState(false);
+  const [waPermissions, setWaPermissions] = useState<Record<string, boolean>>({
+    send_messages: false,
+    read_chats: false,
+    access_contacts: false,
+    manage_contacts: false,
+    access_groups: false,
+    send_group_messages: false,
+    read_group_chats: false,
+    manage_media: false,
+    view_message_history: false,
+  });
+  const waPollRef = useRef<any>(null);
 
   const aiRef = useRef<GoogleGenAI | null>(null);
   const sessionRef = useRef<any>(null);
@@ -630,13 +650,15 @@ function MaximusAgent({
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
   const audioRecorderRef = useRef<AudioRecorder | null>(null);
   const cloudCanvasRef = useRef<HTMLCanvasElement>(null);
+  const miniCloudCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
   const videoIntervalRef = useRef<any>(null);
 
-  const transcriptRef = useRef<{ text: string; role: 'user' | 'model' } | null>(null);
+  const userTranscriptRef = useRef<string>('');
+  const modelTranscriptRef = useRef<string>('');
   const transcriptTimeoutRef = useRef<any>(null);
   const speakingTimeoutRef = useRef<any>(null);
   const lastVoiceTriggerRef = useRef<string>('');
@@ -852,7 +874,8 @@ function MaximusAgent({
 
     if (!text || !sessionRef.current || !isActive) return;
 
-    setCurrentTranscript({ role: 'user', text });
+    userTranscriptRef.current = text;
+    setUserTranscript(text);
     setMessages(prev => [...prev, { role: 'user', text, timestamp: new Date().toISOString() }]);
     saveMessage('user', text);
     sendTextToLive(text);
@@ -872,14 +895,13 @@ function MaximusAgent({
       speedY: 0.12 + Math.random() * 0.2,
     }));
 
-    const drawClouds = (avg: number, peak: number) => {
-      const canvas = cloudCanvasRef.current;
+    const drawClouds = (canvas: HTMLCanvasElement | null, avg: number, peak: number, size: number, puffs: typeof cloudPuffs) => {
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       const dpr = window.devicePixelRatio || 1;
-      const w = 208 * dpr;
-      const h = 208 * dpr;
+      const w = size * dpr;
+      const h = size * dpr;
       if (canvas.width !== w || canvas.height !== h) {
         canvas.width = w;
         canvas.height = h;
@@ -887,9 +909,9 @@ function MaximusAgent({
       ctx.clearRect(0, 0, w, h);
 
       const time = Date.now() / 1000;
-      const boost = 1 + avg * 0.6 + peak * 0.4;
+      const boost = 1 + avg * 0.8 + peak * 0.6;
 
-      cloudPuffs.forEach((puff, i) => {
+      puffs.forEach((puff) => {
         const driftX = Math.sin(time * puff.speedX + puff.phaseX) * 0.12;
         const driftY = Math.cos(time * puff.speedY + puff.phaseY) * 0.1;
         const x = (puff.cx + driftX) * w;
@@ -897,7 +919,7 @@ function MaximusAgent({
         const baseR = puff.r * w * 0.45;
         const r = baseR * boost;
 
-        const alpha = 0.12 + avg * 0.25 + peak * 0.15;
+        const alpha = 0.12 + avg * 0.35 + peak * 0.2;
         const gradient = ctx.createRadialGradient(x, y, 0, x, y, r);
         gradient.addColorStop(0, `rgba(208, 167, 139, ${Math.min(1, alpha * 1.5)})`);
         gradient.addColorStop(0.4, `rgba(208, 167, 139, ${Math.min(1, alpha * 0.8)})`);
@@ -918,16 +940,20 @@ function MaximusAgent({
 
         setVolumes(prev => prev.map((v, i) => {
           let target = Math.max(streamerVols[i] || 0, recorderVols[i] || 0);
-          target = Math.min(1, target * 1.5);
-          return v + (target - v) * 0.4;
+          target = Math.min(1, target * 1.8);
+          return v + (target - v) * 0.5;
         }));
 
         const avg = streamerVols.reduce((a, b) => a + b, 0) / streamerVols.length;
         const peak = Math.max(...streamerVols);
-        drawClouds(avg, peak);
+        drawClouds(cloudCanvasRef.current, avg, peak, 208, cloudPuffs);
+        const recAvg = recorderVols.reduce((a, b) => a + b, 0) / recorderVols.length;
+        const recPeak = Math.max(...recorderVols);
+        drawClouds(miniCloudCanvasRef.current, recAvg, recPeak, 80, cloudPuffs);
       } else {
         setVolumes(prev => prev.map(v => v + (0.05 - v) * 0.2));
-        drawClouds(0.05, 0.05);
+        drawClouds(cloudCanvasRef.current, 0.05, 0.05, 208, cloudPuffs);
+        drawClouds(miniCloudCanvasRef.current, 0.05, 0.05, 80, cloudPuffs);
       }
 
       animationFrame = requestAnimationFrame(updateVolumes);
@@ -1350,6 +1376,48 @@ ${historyContext}
                     },
                     required: ["serviceName", "action"]
                   }
+                },
+                {
+                  name: "whatsapp_action",
+                  description: "Execute WhatsApp operations. Only actions the user has enabled in their permission toggles will work.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      action: {
+                        type: Type.STRING,
+                        description: "The WhatsApp action: sendMessage, readChats, getContacts, addContact, getGroups, sendGroupMessage, readGroupChat, getMessageHistory"
+                      },
+                      to: {
+                        type: Type.STRING,
+                        description: "Recipient phone number (for sendMessage, addContact)"
+                      },
+                      text: {
+                        type: Type.STRING,
+                        description: "Message text (for sendMessage, sendGroupMessage)"
+                      },
+                      name: {
+                        type: Type.STRING,
+                        description: "Contact name (for addContact)"
+                      },
+                      number: {
+                        type: Type.STRING,
+                        description: "Contact number (for addContact)"
+                      },
+                      groupId: {
+                        type: Type.STRING,
+                        description: "Group ID (for sendGroupMessage, readGroupChat)"
+                      },
+                      chatId: {
+                        type: Type.STRING,
+                        description: "Chat ID (for getMessageHistory)"
+                      },
+                      limit: {
+                        type: Type.NUMBER,
+                        description: "Max results to return (default 20)"
+                      }
+                    },
+                    required: ["action"]
+                  }
                 }
               ]
             }
@@ -1381,7 +1449,7 @@ ${historyContext}
                   try {
                     let result: any = null;
 
-                    if (call.name !== 'get_user_location' && !tok) {
+                    if (call.name !== 'get_user_location' && call.name !== 'whatsapp_action' && !tok) {
                       result = { error: "Access token expired or missing. Please re-authenticate Google services in settings." };
                     } else if (call.name === 'list_gmail_messages') {
                       const max = Math.min((call.args as any).maxResults || 5, 5);
@@ -1486,6 +1554,22 @@ ${historyContext}
                         else if (!r.ok) { result = { error: r.data?.error || 'Service request failed' }; }
                         else { result = r.data; }
                       }
+                    } else if (call.name === 'whatsapp_action') {
+                      const args = call.args as any;
+                      try {
+                        const { callWhatsAppTool } = await import('./lib/whatsappClient');
+                        result = await callWhatsAppTool(user.uid, args.action, {
+                          to: args.to,
+                          text: args.text,
+                          name: args.name,
+                          number: args.number,
+                          groupId: args.groupId,
+                          chatId: args.chatId,
+                          limit: args.limit,
+                        }, waPermissions);
+                      } catch (e: any) {
+                        result = { ok: false, error: e.message || 'WhatsApp action failed' };
+                      }
                     }
 
                     setTasks(prev =>
@@ -1524,89 +1608,100 @@ ${historyContext}
               }
             }
 
-            if (message.serverContent) {
-              if (message.serverContent.interrupted) {
-                audioStreamerRef.current?.stop();
-                setIsAgentSpeaking(false);
-                return;
-              }
-
-              const content: any = message.serverContent;
-
-              if (content.inputTranscription?.text) {
-                const text = content.inputTranscription.text.trim();
-
-                if (text) {
-                  setCurrentTranscript({ text, role: 'user' });
-                  saveMessage('user', text);
-                  tryTriggerComputerTask(text);
-
-                  if (transcriptTimeoutRef.current) clearTimeout(transcriptTimeoutRef.current);
-                  transcriptTimeoutRef.current = setTimeout(() => setCurrentTranscript(null), 4000);
+              if (message.serverContent) {
+                if (message.serverContent.interrupted) {
+                  audioStreamerRef.current?.stop();
+                  setIsAgentSpeaking(false);
+                  return;
                 }
-              }
 
-              if (content.outputTranscription?.text) {
-                const text = content.outputTranscription.text;
-                const currentText = transcriptRef.current?.role === 'model' ? transcriptRef.current.text : "";
-                const updatedText = (currentText + text).trim();
+                const content: any = message.serverContent;
 
-                transcriptRef.current = { text: updatedText, role: 'model' };
-                setCurrentTranscript({ text: updatedText, role: 'model' });
+                if (content.inputTranscription?.text) {
+                  const text = content.inputTranscription.text.trim();
 
-                if (transcriptTimeoutRef.current) clearTimeout(transcriptTimeoutRef.current);
-                transcriptTimeoutRef.current = setTimeout(() => setCurrentTranscript(null), 4000);
-              }
-
-              const modelTurn = message.serverContent.modelTurn;
-
-              if (modelTurn?.parts) {
-                for (const part of modelTurn.parts) {
-                  if (part.inlineData?.data) {
-                    audioStreamerRef.current?.addPCM16(part.inlineData.data);
-                    setIsAgentSpeaking(true);
-
-                    if (speakingTimeoutRef.current) clearTimeout(speakingTimeoutRef.current);
-                    speakingTimeoutRef.current = setTimeout(() => setIsAgentSpeaking(false), 700);
-                  }
-
-                  if ((part as any).text) {
-                    const currentText = transcriptRef.current?.role === 'model' ? transcriptRef.current.text : "";
-                    const updatedText = (currentText + (part as any).text).trim();
-
-                    transcriptRef.current = { text: updatedText, role: 'model' };
-                    setCurrentTranscript({ text: updatedText, role: 'model' });
+                  if (text) {
+                    userTranscriptRef.current = text;
+                    setUserTranscript(text);
+                    saveMessage('user', text);
+                    tryTriggerComputerTask(text);
 
                     if (transcriptTimeoutRef.current) clearTimeout(transcriptTimeoutRef.current);
-                    transcriptTimeoutRef.current = setTimeout(() => setCurrentTranscript(null), 4000);
+                    transcriptTimeoutRef.current = setTimeout(() => {
+                      setUserTranscript('');
+                      setModelTranscript('');
+                    }, 4000);
+                  }
+                }
+
+                if (content.outputTranscription?.text) {
+                  const text = content.outputTranscription.text;
+                  const updatedText = (modelTranscriptRef.current + text).trim();
+                  modelTranscriptRef.current = updatedText;
+                  setModelTranscript(updatedText);
+
+                  if (transcriptTimeoutRef.current) clearTimeout(transcriptTimeoutRef.current);
+                  transcriptTimeoutRef.current = setTimeout(() => {
+                    setUserTranscript('');
+                    setModelTranscript('');
+                  }, 4000);
+                }
+
+                const modelTurn = message.serverContent.modelTurn;
+
+                if (modelTurn?.parts) {
+                  for (const part of modelTurn.parts) {
+                    if (part.inlineData?.data) {
+                      audioStreamerRef.current?.addPCM16(part.inlineData.data);
+                      setIsAgentSpeaking(true);
+
+                      if (speakingTimeoutRef.current) clearTimeout(speakingTimeoutRef.current);
+                      speakingTimeoutRef.current = setTimeout(() => setIsAgentSpeaking(false), 700);
+                    }
+
+                    if ((part as any).text) {
+                      const text = (part as any).text;
+                      const updatedText = (modelTranscriptRef.current + text).trim();
+                      modelTranscriptRef.current = updatedText;
+                      setModelTranscript(updatedText);
+
+                      if (transcriptTimeoutRef.current) clearTimeout(transcriptTimeoutRef.current);
+                      transcriptTimeoutRef.current = setTimeout(() => {
+                        setUserTranscript('');
+                        setModelTranscript('');
+                      }, 4000);
+                    }
+                  }
+                }
+
+                const legacyUserTurn = (message.serverContent as any).userTurn;
+
+                if (legacyUserTurn?.parts) {
+                  const text = legacyUserTurn.parts.map((p: any) => p.text).join(" ").trim();
+
+                  if (text) {
+                    userTranscriptRef.current = text;
+                    setUserTranscript(text);
+                    saveMessage('user', text);
+
+                    if (transcriptTimeoutRef.current) clearTimeout(transcriptTimeoutRef.current);
+                    transcriptTimeoutRef.current = setTimeout(() => {
+                      setUserTranscript('');
+                      setModelTranscript('');
+                    }, 4000);
+                  }
+                }
+
+                if ((message.serverContent as any).turnComplete) {
+                  const current = modelTranscriptRef.current;
+
+                  if (current) {
+                    setMessages(prev => [...prev, { role: 'model', text: current, timestamp: new Date().toISOString() }]);
+                    saveMessage('model', current);
+                    modelTranscriptRef.current = '';
                   }
                 }
               }
-
-              const legacyUserTurn = (message.serverContent as any).userTurn;
-
-              if (legacyUserTurn?.parts) {
-                const text = legacyUserTurn.parts.map((p: any) => p.text).join(" ").trim();
-
-                if (text) {
-                  setCurrentTranscript({ text, role: 'user' });
-                  saveMessage('user', text);
-
-                  if (transcriptTimeoutRef.current) clearTimeout(transcriptTimeoutRef.current);
-                  transcriptTimeoutRef.current = setTimeout(() => setCurrentTranscript(null), 4000);
-                }
-              }
-
-              if ((message.serverContent as any).turnComplete) {
-                const current = transcriptRef.current;
-
-                if (current && current.role === 'model' && current.text) {
-                  setMessages(prev => [...prev, { role: 'model', text: current.text, timestamp: new Date().toISOString() }]);
-                  saveMessage('model', current.text);
-                  transcriptRef.current = null;
-                }
-              }
-            }
           },
 
           onclose: (e: any) => {
@@ -1681,14 +1776,16 @@ ${historyContext}
 
     sessionRef.current = null;
     audioRecorderRef.current = null;
-    transcriptRef.current = null;
+    userTranscriptRef.current = '';
+    modelTranscriptRef.current = '';
     sessionStartingRef.current = false;
 
     setIsCameraActive(false);
     setIsAgentSpeaking(false);
     setIsActive(false);
     setConnecting(false);
-    setCurrentTranscript(null);
+    setUserTranscript('');
+    setModelTranscript('');
   };
 
   const saveMessage = async (role: 'user' | 'model', text: string) => {
@@ -1730,7 +1827,7 @@ ${historyContext}
 
         <div className="flex items-center">
           <button
-            onClick={onLogout}
+            onClick={() => setShowProfilePage(true)}
             className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 overflow-hidden flex items-center justify-center hover:border-[#d0a78b]/50 transition-all duration-300"
             aria-label="User Profile"
           >
@@ -1783,14 +1880,22 @@ ${historyContext}
           </button>
         </div>
 
-        <div className="w-full max-w-sm px-8 flex flex-col items-center justify-center text-center h-[64px] transition-opacity duration-700">
-          <AnimatePresence mode="wait">
-            {currentTranscript && (
+        <div className="w-full max-w-xl px-8 flex flex-col items-center justify-center text-center h-[80px] gap-1 transition-opacity duration-700">
+          <AnimatePresence>
+            {userTranscript && (
               <KaraokeTranscript
-                key={`${currentTranscript.role}-${currentTranscript.text}`}
-                role={currentTranscript.role}
-                text={currentTranscript.text}
-                name={currentTranscript.role === 'user' ? (user.displayName?.split(' ')[0] || 'Commander') : personaName}
+                role="user"
+                text={userTranscript}
+                name={user.displayName?.split(' ')[0] || 'User'}
+              />
+            )}
+          </AnimatePresence>
+          <AnimatePresence>
+            {modelTranscript && (
+              <KaraokeTranscript
+                role="model"
+                text={modelTranscript}
+                name={personaName}
               />
             )}
           </AnimatePresence>
@@ -1820,13 +1925,25 @@ ${historyContext}
             {connecting ? (
               <Loader2 className="w-7 h-7 animate-spin" />
             ) : isActive ? (
-              <Square className="w-6 h-6 fill-current" />
+              <div className="absolute inset-0 rounded-full overflow-hidden flex items-center justify-center">
+                <canvas
+                  ref={miniCloudCanvasRef}
+                  className="absolute inset-0 w-full h-full pointer-events-none"
+                  width={80}
+                  height={80}
+                />
+                <span className="text-[9px] font-extrabold uppercase tracking-widest z-10 text-[#d0a78b]">
+                  Stop
+                </span>
+              </div>
             ) : (
-              <Power className="w-7 h-7" />
+              <>
+                <Power className="w-7 h-7" />
+                <span className="text-[9px] font-extrabold uppercase tracking-widest mt-1">
+                  Start
+                </span>
+              </>
             )}
-            <span className="text-[9px] font-extrabold uppercase tracking-widest mt-1">
-              {isActive ? 'Stop' : 'Start'}
-            </span>
           </button>
 
           <button
@@ -1870,6 +1987,14 @@ ${historyContext}
             isActive={isActive}
             sendVideoToLive={sendVideoToLive}
             sendTextToLive={sendTextToLive}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showProfilePage && (
+          <ProfilePage
+            onClose={() => setShowProfilePage(false)}
           />
         )}
       </AnimatePresence>
@@ -2019,6 +2144,104 @@ ${historyContext}
                     <p className="text-[10px] text-gray-500 leading-relaxed uppercase tracking-tighter">
                       Connect to enable Gmail, Calendar, Drive, Tasks, and YouTube capabilities.
                     </p>
+                  )}
+                </div>
+
+                <div className="p-5 bg-white/5 border border-white/10 rounded-[24px] space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-1">
+                        WhatsApp
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${waStatus === 'paired' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : waStatus === 'qr_ready' || waStatus === 'init' ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : 'bg-zinc-600'}`} />
+                        <span className={`text-xs font-mono uppercase tracking-widest ${waStatus === 'paired' ? 'text-emerald-500' : waStatus === 'qr_ready' || waStatus === 'init' ? 'text-amber-500' : 'text-zinc-500'}`}>
+                          {waStatus === 'paired' ? `Connected${waPhone ? ` (${waPhone})` : ''}` : waStatus === 'qr_ready' ? 'Scan QR code' : waStatus === 'init' ? 'Connecting...' : 'Not connected'}
+                        </span>
+                      </div>
+                    </div>
+                    {waStatus === 'paired' ? (
+                      <button
+                        onClick={async () => {
+                          await disconnectWhatsApp(user.uid);
+                          setWaStatus('not_found');
+                          setWaPhone(null);
+                          setWaQrCode(null);
+                        }}
+                        className="px-4 py-2 bg-white/10 hover:bg-red-500/20 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all"
+                      >
+                        Disconnect
+                      </button>
+                    ) : (
+                      <button
+                        onClick={async () => {
+                          setWaPairing(true);
+                          try {
+                            await startWhatsAppPairing(user.uid);
+                            setWaStatus('init');
+                            waPollRef.current = setInterval(async () => {
+                              try {
+                                const s = await getWhatsAppStatus(user.uid);
+                                setWaStatus(s.status);
+                                if (s.qrCode) setWaQrCode(s.qrCode);
+                                if (s.phone) setWaPhone(s.phone);
+                                if (s.status === 'paired' || s.status === 'disconnected' || s.error) {
+                                  if (waPollRef.current) clearInterval(waPollRef.current);
+                                  setWaPairing(false);
+                                }
+                              } catch {}
+                            }, 1500);
+                          } catch (e: any) {
+                            setWaPairing(false);
+                          }
+                        }}
+                        disabled={waPairing}
+                        className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all disabled:opacity-50"
+                      >
+                        {waPairing ? 'Pairing...' : 'Pair WhatsApp'}
+                      </button>
+                    )}
+                  </div>
+
+                  {waStatus === 'paired' && (
+                    <div className="space-y-3 pt-2 border-t border-white/5">
+                      <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Permissions</p>
+                      {[
+                        { key: 'send_messages', label: 'Send Messages' },
+                        { key: 'read_chats', label: 'Read Chats' },
+                        { key: 'access_contacts', label: 'Access Contacts' },
+                        { key: 'manage_contacts', label: 'Manage Contacts' },
+                        { key: 'access_groups', label: 'Access Groups' },
+                        { key: 'send_group_messages', label: 'Send Group Messages' },
+                        { key: 'read_group_chats', label: 'Read Group Chats' },
+                        { key: 'manage_media', label: 'Manage Media / Files' },
+                        { key: 'view_message_history', label: 'View Message History' },
+                      ].map(p => (
+                        <label key={p.key} className="flex items-center justify-between py-1.5 cursor-pointer">
+                          <span className="text-xs text-zinc-400">{p.label}</span>
+                          <button
+                            onClick={() => setWaPermissions(prev => ({ ...prev, [p.key]: !prev[p.key] }))}
+                            className={`w-9 h-5 rounded-full transition-all ${waPermissions[p.key] ? 'bg-[#d0a78b]' : 'bg-zinc-700'}`}
+                          >
+                            <div className={`w-3.5 h-3.5 rounded-full bg-white transition-all mt-[3px] ${waPermissions[p.key] ? 'ml-[18px]' : 'ml-[3px]'}`} />
+                          </button>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+
+                  {waQrCode && waStatus === 'qr_ready' && (
+                    <div className="flex flex-col items-center pt-2 border-t border-white/5">
+                      <p className="text-[10px] text-zinc-500 mb-2 uppercase tracking-wider">Scan with WhatsApp</p>
+                      <img src={waQrCode} alt="WhatsApp QR" className="w-48 h-48 rounded-2xl bg-white p-3" />
+                      <p className="text-[10px] text-zinc-600 mt-2">Open WhatsApp &gt; Linked Devices &gt; Link a Device</p>
+                      <button
+                        onClick={() => { setWaQrCode(null); setWaStatus('not_found'); }}
+                        className="text-[10px] text-zinc-600 hover:text-red-400 mt-2 uppercase tracking-wider"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   )}
                 </div>
 

@@ -38,7 +38,7 @@ export function KaraokeTranscript({ role, text, name }: { role: 'user' | 'model'
               initial={{ opacity: 0, scale: 0.9, filter: 'blur(4px)' }}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
               transition={{ duration: 0.2 }}
-              className={`inline-block mx-1 ${role === 'model' ? 'text-2xl sm:text-4xl' : 'text-xl sm:text-3xl'}`}
+               className={`inline-block mx-0.5 text-base`}
               style={{
                 opacity: i < words.length - 2 ? 0.6 : 1,
                 textShadow: i >= words.length - 2 ? (role === 'model' ? '0 0 20px rgba(245,158,11,0.6)' : '0 0 15px rgba(255,255,255,0.4)') : 'none',
