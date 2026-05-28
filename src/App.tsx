@@ -4,6 +4,7 @@ import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut,
 import { supabase, handleDbError } from './lib/supabase';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from '@google/genai';
 import { AudioRecorder, AudioStreamer } from './lib/audio';
+import { listKnowledgeFiles, fetchKnowledgeFileContent } from './lib/supabaseStorage';
 import { Square, Loader2, Power, Check, Settings, X, Save, Activity, Video, MessageSquare, Smartphone } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { KaraokeTranscript } from './components/KaraokeTranscript';
@@ -1223,7 +1224,7 @@ function MaximusAgent({
       });
     };
 
-    const drawStopBars = (canvas: HTMLCanvasElement | null, vols: number[]) => {
+    const drawStopClouds = (canvas: HTMLCanvasElement | null, vols: number[]) => {
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
@@ -1237,30 +1238,41 @@ function MaximusAgent({
       }
       ctx.clearRect(0, 0, w, h);
 
-      const cx = w / 2;
-      const cy = h / 2;
-      const num = 8;
-      const maxR = w * 0.35;
+      const time = Date.now() / 1000;
       const avg = vols.reduce((a, b) => a + b, 0) / vols.length;
+      const peak = Math.max(...vols);
+      const boost = 1 + avg * 1.2 + peak * 0.8;
 
-      for (let i = 0; i < num; i++) {
-        const angle = (i / num) * Math.PI * 2 - Math.PI / 2;
-        const val = vols[Math.floor((i / num) * vols.length)] || 0;
-        const len = 4 * dpr + val * maxR * 1.2;
-        const inner = maxR - len;
-        const x1 = cx + Math.cos(angle) * inner;
-        const y1 = cy + Math.sin(angle) * inner;
-        const x2 = cx + Math.cos(angle) * maxR;
-        const y2 = cy + Math.sin(angle) * maxR;
+      // Use a fixed set of puffs for the stop button
+      const puffs = Array.from({ length: 8 }, (_, i) => ({
+        cx: 0.2 + (i / 8) * 0.6,
+        cy: 0.2 + Math.sin(i) * 0.3 + 0.4,
+        r: 0.1 + Math.random() * 0.1,
+        phaseX: i * Math.PI / 4,
+        phaseY: i * Math.PI / 2,
+        speedX: 0.3 + (i % 3) * 0.1,
+        speedY: 0.2 + (i % 2) * 0.1,
+      }));
+
+      puffs.forEach((puff) => {
+        const driftX = Math.sin(time * puff.speedX + puff.phaseX) * 0.1;
+        const driftY = Math.cos(time * puff.speedY + puff.phaseY) * 0.1;
+        const x = (puff.cx + driftX) * w;
+        const y = (puff.cy + driftY) * h;
+        const baseR = puff.r * w * 0.4;
+        const r = baseR * boost;
+
+        const alpha = 0.08 + avg * 0.4 + peak * 0.2;
+        const gradient = ctx.createRadialGradient(x, y, 0, x, y, r);
+        gradient.addColorStop(0, `rgba(208, 167, 139, ${Math.min(1, alpha * 2)})`);
+        gradient.addColorStop(0.4, `rgba(208, 167, 139, ${Math.min(1, alpha * 1.1)})`);
+        gradient.addColorStop(1, 'rgba(208, 167, 139, 0)');
 
         ctx.beginPath();
-        ctx.strokeStyle = `rgba(208, 167, 139, ${0.3 + avg * 0.7})`;
-        ctx.lineWidth = 2.5 * dpr;
-        ctx.lineCap = 'round';
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
-      }
+        ctx.fillStyle = gradient;
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      });
     };
 
     const updateVolumes = () => {
@@ -1278,15 +1290,16 @@ function MaximusAgent({
         const peak = Math.max(...streamerVols);
         const recAvg = recorderVols.reduce((a, b) => a + b, 0) / recorderVols.length;
         const recPeak = Math.max(...recorderVols);
-        const combinedAvg = (avg + recAvg) / 2;
-        const combinedPeak = Math.max(peak, recPeak);
-        drawClouds(cloudCanvasRef.current, combinedAvg, combinedPeak, 256, cloudPuffs);
-        drawStopBars(stopCanvasRef.current, recorderVols);
-      } else {
-        setVolumes(prev => prev.map(v => v + (0.05 - v) * 0.2));
-        drawClouds(cloudCanvasRef.current, 0.05, 0.05, 256, cloudPuffs);
-        drawStopBars(stopCanvasRef.current, Array(11).fill(0));
-      }
+         const combinedAvg = (avg + recAvg) / 2;
+         const combinedPeak = Math.max(peak, recPeak);
+         drawClouds(cloudCanvasRef.current, combinedAvg, combinedPeak, 256, cloudPuffs);
+         drawStopClouds(stopCanvasRef.current, recorderVols);
+       } else {
+         setVolumes(prev => prev.map(v => v + (0.05 - v) * 0.2));
+         drawClouds(cloudCanvasRef.current, 0.05, 0.05, 256, cloudPuffs);
+         drawStopClouds(stopCanvasRef.current, Array(11).fill(0));
+       }
+
 
       animationFrame = requestAnimationFrame(updateVolumes);
     };
@@ -1550,6 +1563,21 @@ function MaximusAgent({
     sessionStartingRef.current = true;
     setConnecting(true);
 
+    // Fetch knowledge base content
+    let knowledgeBaseContext = "";
+    try {
+      const files = await listKnowledgeFiles(user.uid);
+      const contents = await Promise.all(
+        files.map(f => fetchKnowledgeFileContent(user.uid, f.id))
+      );
+      knowledgeBaseContext = contents.filter(Boolean).join("\n\n---\n\n");
+      if (knowledgeBaseContext) {
+        knowledgeBaseContext = `\nUSER KNOWLEDGE BASE:\n${knowledgeBaseContext}`;
+      }
+    } catch (err) {
+      console.error("Error fetching knowledge base:", err);
+    }
+
     const dynamicSystemInstruction = `
 Visible conversation name: ${personaName}.
 User language: ${authLanguage}.
@@ -1565,6 +1593,13 @@ CRITICAL LANGUAGE RULE:
 Always respond in the user's language (code: ${authLanguage}) unless the user explicitly asks you to switch.
 You are natively fluent in every language — respond naturally as a human would in that language.
 If the user switches language mid-conversation, follow them immediately without comment.
+
+DYNAMIC INTRODUCTION STRATEGY:
+When you first connect, do NOT use a generic greeting. Instead, create a dynamic, personalized opening topic using the following context:
+1. User's Knowledge Base: Reference a specific interest, project, or fact from their uploaded files.
+2. Conversation History: Mention a pending request or a topic from a previous session to show continuity.
+3. Persona: Blend this with your specific personality.
+The goal is to make the user feel that you've been thinking about them and their world. Start the conversation naturally, like a companion who knows them well.
 
 PENDING TASKS & OUTPUT RULE:
 Review the PENDING REQUESTS section below. These are user requests from past sessions that might not have been completed. If any are unfinished, acknowledge them and execute them via the sandbox immediately.
@@ -1595,8 +1630,11 @@ ${customPrompt || ""}
 
 ${VOICE_PERSONALITY_PROMPT}
 
+${knowledgeBaseContext}
+
 ${historyContext}
 `;
+
 
     const gFetch = async (tok: string | null, url: string, options?: RequestInit): Promise<{ ok: boolean; status: number; data: any }> => {
       if (!tok) return { ok: false, status: 0, data: { error: 'No access token' } };

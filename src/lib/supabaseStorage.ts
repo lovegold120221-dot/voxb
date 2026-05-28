@@ -128,6 +128,30 @@ export async function deleteKnowledgeFile(userId: string, fileId: string): Promi
   if (dbError) throw dbError;
 }
 
+export async function fetchKnowledgeFileContent(userId: string, fileId: string): Promise<string | null> {
+  const { data: file, error: findError } = await supabase
+    .from('knowledge_files')
+    .select('storage_path, file_name')
+    .eq('id', fileId)
+    .eq('user_id', userId)
+    .single();
+
+  if (findError || !file) return null;
+
+  const { data, error: downloadError } = await supabase.storage
+    .from(KNOWLEDGE_BUCKET)
+    .download(file.storage_path);
+
+  if (downloadError || !data) return null;
+
+  try {
+    const text = await data.text();
+    return `File: ${file.file_name}\nContent:\n${text}`;
+  } catch {
+    return null;
+  }
+}
+
 export async function updateKnowledgeDomains(userId: string, domains: string[]): Promise<void> {
   const { error } = await supabase
     .from('user_settings')
