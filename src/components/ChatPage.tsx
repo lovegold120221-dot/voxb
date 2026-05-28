@@ -82,7 +82,7 @@ export function ChatPage({
 
   useEffect(() => {
     const container = scrollRef.current;
-    if (!container) return;
+    if (!container) return undefined;
 
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
