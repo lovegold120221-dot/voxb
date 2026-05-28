@@ -183,6 +183,8 @@ export function ChatPage({
                       <button
                         onClick={() => setSidebarOpen(false)}
                         className="p-1 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800/50 transition-all"
+                        aria-label="Close sidebar"
+                        title="Close sidebar"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -360,6 +362,8 @@ export function ChatPage({
                 type="file"
                 className="hidden"
                 accept="image/*,.pdf,.doc,.docx,.txt"
+                aria-label="Attach file"
+                title="Attach file"
               />
               <input
                 ref={inputRef}
@@ -374,6 +378,8 @@ export function ChatPage({
                 type="submit"
                 disabled={!isActive || !chatInput.trim()}
                 className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#d0a78b] text-black flex items-center justify-center hover:bg-[#ebd0bc] transition-colors disabled:opacity-30 shrink-0"
+                aria-label="Send message"
+                title="Send message"
               >
                 <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>

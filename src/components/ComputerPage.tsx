@@ -120,6 +120,8 @@ export function ComputerPage({
         <button
           onClick={onClose}
           className="p-2 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-all"
+          aria-label="Close"
+          title="Close"
         >
           <X className="w-5 h-5" />
         </button>

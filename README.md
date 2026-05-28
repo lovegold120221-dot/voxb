@@ -1,3 +1,5 @@
+# Eburon AI Beatrice
+
 ```mermaid
 flowchart TB
     subgraph Client["Client Layer"]
@@ -209,7 +211,7 @@ flowchart TB
 ## Related Files
 
 | File | Purpose |
-|---|---|
+| --- | --- |
 | `src/App.tsx` | Entire application component (~2800 lines) |
 | `src/firebase.ts` | Firebase init + `handleFirestoreError()` |
 | `src/lib/audio.ts` | `AudioStreamer` + `AudioRecorder` |
@@ -228,6 +230,7 @@ Run `supabase-migration.sql` in the Supabase SQL Editor at:
 `https://supabase.com/dashboard/project/inypxifrayeafrlhkulz/sql`
 
 This enables:
+
 - `user_settings` table with RLS disabled
 - `knowledge_files` table for uploaded document metadata
 - Storage buckets: `avatars`, `knowledge-base`
@@ -235,7 +238,7 @@ This enables:
 
 ## Commands
 
-```
+```bash
 npm run dev          # Dev server, port 3000, binds 0.0.0.0
 npm run build        # Production build via Vite
 npm run lint         # Typecheck only (tsc --noEmit)

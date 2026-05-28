@@ -179,6 +179,8 @@ export function ProfilePage({ onClose }: ProfilePageProps) {
         <button
           onClick={onClose}
           className="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800/50 transition-all"
+          aria-label="Close profile"
+          title="Close profile"
         >
           <X className="w-5 h-5" />
         </button>
@@ -235,6 +237,8 @@ export function ProfilePage({ onClose }: ProfilePageProps) {
                 accept="image/*"
                 onChange={handleAvatarUpload}
                 className="hidden"
+                aria-label="Upload avatar"
+                title="Upload avatar"
               />
             </div>
             <div>
@@ -279,6 +283,8 @@ export function ProfilePage({ onClose }: ProfilePageProps) {
             accept=".txt,.csv,.pdf,.doc,.docx,.json,.md,text/plain,text/csv,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             onChange={handleKnowledgeUpload}
             className="hidden"
+            aria-label="Upload knowledge file"
+            title="Upload knowledge file"
           />
 
           {knowledgeFiles.length > 0 && (
@@ -294,6 +300,8 @@ export function ProfilePage({ onClose }: ProfilePageProps) {
                     onClick={() => handleDeleteFile(f.id)}
                     disabled={deletingFile === f.id}
                     className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                    aria-label="Delete file"
+                    title="Delete file"
                   >
                     {deletingFile === f.id ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -327,6 +335,8 @@ export function ProfilePage({ onClose }: ProfilePageProps) {
               onClick={addDomain}
               disabled={!domainInput.trim()}
               className="px-4 py-2.5 rounded-xl bg-[#d0a78b]/15 border border-[#d0a78b]/20 text-[#d0a78b] text-sm font-medium hover:bg-[#d0a78b]/25 transition-colors disabled:opacity-30"
+              aria-label="Add domain"
+              title="Add domain"
             >
               <Globe className="w-4 h-4" />
             </button>

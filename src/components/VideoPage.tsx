@@ -206,6 +206,8 @@ export function VideoPage({
         <button
           onClick={onClose}
           className="p-2.5 rounded-full bg-black/50 backdrop-blur-md text-white hover:bg-black/70 transition-all"
+          aria-label="Close video"
+          title="Close video"
         >
           <X className="w-5 h-5" />
         </button>

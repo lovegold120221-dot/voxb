@@ -1533,7 +1533,7 @@ GOOGLE SERVICES PERMISSION RULE:
 You can access the user's Google Calendar, Gmail, Tasks, Drive, and YouTube. However, you MUST NEVER call any Google API tool automatically. If you want to check the user's calendar, events, holidays, emails, tasks, or any Google data, you MUST first ask the user casually in conversation. Only call a Google tool after they explicitly say yes or tell you to go ahead. This is a strict rule — do not auto-fetch anything.
 
 DOCUMENT CREATION RULE:
-When the user asks you to create a document (contract, report, letter, invoice, proposal, form, or any written material), you MUST generate it as a complete standalone page with all styling and scripts embedded in a single file. Every document you create should be fully self-contained — merge HTML, CSS, and JavaScript into one file so it works as a preview in the browser. When you present it to the user, use natural language: call it a "document", "preview", "draft", or "file" — never say "HTML". Tell the user something like "I've put together a draft for you, take a look" or "Here's the document in the workspace." Never use technical terms like "HTML" when talking to the user about their document.
+When the user asks you to create a document (contract, report, letter, invoice, proposal, form, or any written material), you MUST generate the complete file as the \`content\` parameter of the \`create_document\` tool call. The content must be a fully self-contained standalone page with all HTML, CSS, and JavaScript merged into a single file that works as a preview in the browser. Use the contract-sample.html in the public folder as your structural template — it uses serif fonts for body text, sans-serif for UI panels, CSS variables for theming, a responsive two-column layout (editor + preview), A4-style paper styling, dynamic data binding, and a signature canvas. Follow that same pattern for all documents: proper <!DOCTYPE html>, embedded <style>, semantic structure, responsive design, and print styles. When you present it to the user, use natural language: call it a "document", "preview", "draft", or "file" — never say "HTML". Tell the user something like "I've put together a draft for you, take a look" or "Here's the document in the workspace." Never use technical terms like "HTML" when talking to the user about their document.
 
 ${customPrompt || ""}
 
@@ -1750,14 +1750,14 @@ ${historyContext}
                 },
                 {
                   name: "create_document",
-                  description: "Create a document (contract, report, letter, invoice, proposal, form, dashboard, or any written/visual material). The output will be a complete standalone page displayed in the workspace. Never mention 'HTML' to the user — say 'document', 'preview', 'draft', or 'file' instead.",
+                  description: "Create a document (contract, report, letter, invoice, proposal, form, dashboard, or any written/visual material). The content must be a complete standalone single-file HTML page with all CSS and JS embedded. Never mention 'HTML' to the user — say 'document', 'preview', 'draft', or 'file' instead.",
                   parameters: {
                     type: Type.OBJECT,
                     properties: {
-                      title: { type: Type.STRING, description: "Document title." },
-                      content: { type: Type.STRING, description: "Document content (optional, defaults to empty)." }
+                      title: { type: Type.STRING, description: "Document title displayed to the user." },
+                      content: { type: Type.STRING, description: "Complete standalone single-file HTML page with embedded CSS and JS. Must include <!DOCTYPE html>, <html>, <head>, <body>. Fully self-contained — no external resources." }
                     },
-                    required: ["title"]
+                    required: ["title", "content"]
                   }
                 }
               ] as FunctionDeclaration[]
@@ -1920,44 +1920,24 @@ ${historyContext}
                       }
                     } else if (callName === 'create_document') {
                       const args = call.args as any;
-                      try {
-                        const { createSandboxTask } = await import('./lib/sandboxClient');
-                        const { taskId, task } = await createSandboxTask(
-                          args.type || 'document',
-                          args.label || args.description?.slice(0, 40) || 'Document',
-                          args.description || args.label || '',
-                          user?.email || undefined,
-                          user?.uid || undefined,
-                          historyContextRef.current,
-                        );
-                        activeTaskIdRef.current = taskId;
-                        setComputerTask(task);
-                        setComputerOutput(null);
+                      if (args.content) {
+                        const taskId = crypto.randomUUID();
+                        setComputerTask({
+                          id: taskId,
+                          type: 'webpage',
+                          label: args.title || 'Document',
+                          status: 'done',
+                          steps: [{ key: 'generated', label: 'Document generated', done: true, active: false }],
+                          output: { type: 'webpage', title: args.title || 'Document', content: args.content, fileType: 'html' },
+                          createdAt: Date.now(),
+                        });
+                        setComputerOutput({ content: args.content, title: args.title || 'Document' });
                         setComputerPreviewUrl(null);
                         setComputerDownloadUrl(null);
                         setShowComputerPage(true);
-                        pollTaskStatus(
-                          taskId,
-                          (updatedTask, previewUrl, downloadUrl) => {
-                            setComputerTask(updatedTask);
-                            if (previewUrl) setComputerPreviewUrl(previewUrl);
-                            if (downloadUrl) setComputerDownloadUrl(downloadUrl);
-                          },
-                          (finalTask, output, previewUrl, downloadUrl) => {
-                            setComputerTask(finalTask);
-                            setComputerOutput(output ? { content: output.content, title: output.title } : null);
-                            if (previewUrl) setComputerPreviewUrl(previewUrl);
-                            if (downloadUrl) setComputerDownloadUrl(downloadUrl);
-                            activeTaskIdRef.current = null;
-                          },
-                          (error) => {
-                            result = { error };
-                            activeTaskIdRef.current = null;
-                          },
-                        );
-                        result = { ok: true, taskId };
-                      } catch (e: any) {
-                        result = { ok: false, error: e.message || 'Document creation failed' };
+                        result = { ok: true, title: args.title };
+                      } else {
+                        result = { error: 'No document content provided' };
                       }
                     }
 
