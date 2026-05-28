@@ -13,6 +13,8 @@ export default defineConfig(({mode}) => {
       'process.env.SUPABASE_PUBLISHABLE_KEY': JSON.stringify(env.SUPABASE_PUBLISHABLE_KEY),
       'process.env.APP_URL': JSON.stringify(env.APP_URL),
       'process.env.VITE_SANDBOX_URL': JSON.stringify(env.VITE_SANDBOX_URL),
+      'process.env.OLLAMA_API_KEY': JSON.stringify(env.OLLAMA_API_KEY),
+      'process.env.MODEL': JSON.stringify(env.MODEL),
     },
     resolve: {
       alias: {

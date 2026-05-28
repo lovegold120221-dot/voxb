@@ -72,6 +72,10 @@ export function ComputerPage({
 
   useEffect(() => {
     setLocalTask(task);
+    // Auto-open preview for live generation
+    if (task.status === 'working' && ['webpage', 'document'].includes(task.type)) {
+      setShowPreview(true);
+    }
   }, [task]);
 
   const handleCopy = async (text: string) => {
@@ -224,15 +228,16 @@ export function ComputerPage({
           </div>
         </motion.div>
 
-        {/* Output area */}
-        <AnimatePresence>
-          {(localTask.status === 'done' || localTask.status === 'error') && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-              className="space-y-4"
-            >
+         {/* Output area */}
+         <AnimatePresence>
+           {(localTask.status === 'done' || localTask.status === 'error' || (localTask.status === 'working' && isPreviewable)) && (
+             <motion.div
+               initial={{ opacity: 0, y: 20 }}
+               animate={{ opacity: 1, y: 0 }}
+               transition={{ delay: 0.2 }}
+               className="space-y-4"
+             >
+
               <div className="flex items-center gap-2">
                 <p className="text-xs font-semibold uppercase tracking-widest text-zinc-500">
                   Output
@@ -257,18 +262,23 @@ export function ComputerPage({
                 </div>
 
                 <div className="px-4 py-3.5 space-y-3">
-                  {isPreviewable ? (
-                    <button
-                      onClick={() => setShowPreview(!showPreview)}
-                      className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-[#d0a78b]/10 border border-[#d0a78b]/20 text-[#d0a78b] text-sm font-medium hover:bg-[#d0a78b]/20 transition-all"
-                    >
-                      <span className="flex items-center gap-2">
-                        <Eye className="w-4 h-4" />
-                        {showPreview ? 'Hide preview' : 'Open preview'}
-                      </span>
-                      <ChevronRight className={`w-4 h-4 transition-transform ${showPreview ? 'rotate-90' : ''}`} />
-                    </button>
-                  ) : (
+                     {isPreviewable ? (
+                       <button
+                         onClick={() => setShowPreview(!showPreview)}
+                         className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${
+                           showPreview 
+                             ? 'bg-[#d0a78b]/10 border-[#d0a78b]/20 text-[#d0a78b]' 
+                             : 'bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:bg-zinc-800/50'
+                         }`}
+                       >
+                         <span className="flex items-center gap-2">
+                           <Eye className="w-4 h-4" />
+                           {showPreview ? 'Hide preview' : 'Open preview'}
+                         </span>
+                         <ChevronRight className={`w-4 h-4 transition-transform ${showPreview ? 'rotate-90' : ''}`} />
+                       </button>
+                     ) : (
+
                     <div className="bg-[#0a0a0c] rounded-xl p-3 border border-zinc-800/30 max-h-48 overflow-y-auto">
                       <pre className="text-xs text-zinc-400 leading-relaxed whitespace-pre-wrap font-mono">
                         {(outputContent || output?.content || '').slice(0, 2000)}

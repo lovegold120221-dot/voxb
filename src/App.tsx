@@ -1936,11 +1936,14 @@ The goal is to make the user feel that you've been thinking about them and their
 
 PENDING TASKS & OUTPUT RULE:
 Review the PENDING REQUESTS section below. These are user requests from past sessions that might not have been completed. If any are unfinished, acknowledge them and execute them via the sandbox immediately.
-Every tool call you make MUST produce visible output. Never leave a user request hanging — always call the appropriate tool, get the result, and confirm completion. If a tool fails, say so clearly and try an alternative.
+Every user-requested tool call you make MUST produce visible output. The only exception is an idle web_glance used for quiet-reading ambience; that should stay conversational and low-key. Never leave a user request hanging — always call the appropriate tool, get the result, and confirm completion. If a tool fails, say so clearly and try an alternative.
 When the sandbox finishes a task, the output is displayed in the workspace. Reference it naturally.
 
 GOOGLE SERVICES PERMISSION RULE:
 You can access the user's Google Calendar, Gmail, Tasks, Drive, and YouTube. However, you MUST NEVER call any Google API tool automatically. If you want to check the user's calendar, events, holidays, emails, tasks, or any Google data, you MUST first ask the user casually in conversation. Only call a Google tool after they explicitly say yes or tell you to go ahead. This is a strict rule — do not auto-fetch anything.
+
+PUBLIC WEB GLANCE RULE:
+You may use the web_glance tool for public, non-private topics when the user asks for web/current context, or when an idle prompt explicitly selects a quiet-reading style. If using it during idle, sound like you are softly reading to yourself and keep the spoken result short. Never imply you checked private data.
 
 DOCUMENT CREATION RULE:
 When the user asks you to create a document (contract, report, letter, invoice, proposal, form, or any written material), you MUST generate the complete file as the \`content\` parameter of the \`create_document\` tool call. The content must be a fully self-contained standalone page with all HTML, CSS, and JavaScript merged into a single file that works as a preview in the browser. Use the following 11 template files in the public folder as structural references — they demonstrate the correct pattern for each document type:
@@ -2044,6 +2047,24 @@ ${historyContext}
         }
       },
       {
+        name: "web_glance",
+        description: "Search public web snippets for a short topic. Use for public, non-private topics, including quiet idle reading. Do not use it for private user data.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            query: {
+              type: Type.STRING,
+              description: "The public topic or question to look up."
+            },
+            maxResults: {
+              type: Type.NUMBER,
+              description: "Number of short results to return. Maximum 5."
+            }
+          },
+          required: ["query"]
+        }
+      },
+      {
         name: "create_google_task",
         description: "Create a new task in the user's primary Google Tasks list.",
         parameters: {
@@ -2125,9 +2146,26 @@ ${historyContext}
         }
       }
     ];
+    const googleTokenRequiredTools = new Set([
+      'list_gmail_messages',
+      'list_calendar_events',
+      'list_google_tasks',
+      'search_youtube',
+      'create_google_task',
+      'list_drive_files',
+      'search_drive_files',
+      'get_drive_file',
+      'send_gmail_message',
+      'execute_google_service',
+    ]);
 
     try {
       await ensureAudio();
+      try {
+        await startAmbientBed();
+      } catch (ambientError) {
+        console.warn('Ambient room tone did not start:', ambientError);
+      }
 
       const session = await aiRef.current.live.connect({
         model: "gemini-3.1-flash-live-preview",
@@ -2222,7 +2260,7 @@ ${historyContext}
                   try {
                     let result: any = null;
 
-                    if (callName !== 'get_user_location' && callName !== 'whatsapp_action' && !tok) {
+                    if (googleTokenRequiredTools.has(callName) && !tok) {
                       result = { error: "Access token expired or missing. Please re-authenticate Google services in settings." };
                     } else if (callName === 'list_gmail_messages') {
                       const max = Math.min((call.args as any).maxResults || 5, 5);
@@ -2307,6 +2345,9 @@ ${historyContext}
                       if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
                       else if (!r.ok) { result = { error: r.data?.error || 'YouTube search failed' }; }
                       else { result = r.data; }
+                    } else if (callName === 'web_glance') {
+                      const args = call.args as any;
+                      result = await webGlance(String(args.query || ''), Math.min(Number(args.maxResults) || 3, 5));
                     } else if (callName === 'create_google_task') {
                       const r = await gFetch(tok, `https://tasks.googleapis.com/tasks/v1/lists/@default/tasks`,
                         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: (call.args as any).title, notes: (call.args as any).notes || "" }) }
@@ -2350,38 +2391,42 @@ ${historyContext}
                       } catch (e: any) {
                         result = { ok: false, error: e.message || 'WhatsApp action failed' };
                       }
-                     } else if (callName === 'create_document') {
-                       const args = call.args as any;
-                       try {
-                         const { createDocumentOnVps } = await import('./lib/documentClient');
-                         const resultVps = await createDocumentOnVps(user.uid, args);
-                         
-                         if (resultVps && (resultVps.content || resultVps.url)) {
-                           const content = resultVps.content || `Document created at: ${resultVps.url}`;
-                           const title = args.title || resultVps.title || 'Document';
-                           
-                           const taskId = crypto.randomUUID();
-                           setComputerTask({
-                             id: taskId,
-                             type: 'webpage',
-                             label: title,
-                             status: 'done',
-                             steps: [{ key: 'generated', label: 'Document generated via VPS', done: true, active: false }],
-                             output: { type: 'webpage', title, content, fileType: 'html' },
-                             createdAt: Date.now(),
-                           });
-                           setComputerOutput({ content, title });
-                           setComputerPreviewUrl(null);
-                           setComputerDownloadUrl(null);
-                           setShowComputerPage(true);
-                           result = { ok: true, title, status: 'created_on_vps' };
-                         } else {
-                           result = { error: 'VPS failed to return document content' };
-                         }
-                       } catch (e: any) {
-                         result = { error: `VPS Error: ${e.message}` };
-                       }
-                     }
+                      } else if (callName === 'create_document') {
+                        const args = call.args as any;
+                        try {
+                          const { streamDocumentFromVps } = await import('./lib/documentClient');
+                          const title = args.title || 'Document';
+                          
+                          const taskId = crypto.randomUUID();
+                          setComputerTask({
+                            id: taskId,
+                            type: 'webpage',
+                            label: title,
+                            status: 'working',
+                            steps: [{ key: 'generating', label: 'Generating document via Ollama...', done: false, active: true }],
+                            output: { type: 'webpage', title, content: '', fileType: 'html' },
+                            createdAt: Date.now(),
+                          });
+                          setComputerOutput({ content: '', title });
+                          setShowComputerPage(true);
+
+                          const finalContent = await streamDocumentFromVps(user.uid, args, (chunk) => {
+                            setComputerOutput(prev => ({ ...prev, content: (prev.content || '') + chunk }));
+                          });
+
+                          setComputerTask(prev => ({
+                            ...prev,
+                            status: 'done',
+                            steps: [{ key: 'generating', label: 'Document generated', done: true, active: false }],
+                          }));
+                          
+                          result = { ok: true, title, content: finalContent };
+                        } catch (e: any) {
+                          setComputerTask(prev => ({ ...prev, status: 'error' }));
+                          result = { error: `Generation failed: ${e.message}` };
+                        }
+                      }
+
 
 
                     setTasks(prev =>
@@ -2392,7 +2437,9 @@ ${historyContext}
                       setTasks(prev => prev.filter(t => t.id !== taskId));
                     }, 8000);
 
-                    showToolResult(callName, result);
+                    if (!(callName === 'web_glance' && silenceFillerInFlightRef.current)) {
+                      showToolResult(callName, result);
+                    }
 
                     functionResponses.push({
                       id: call.id,
@@ -2404,7 +2451,9 @@ ${historyContext}
 
                     setTasks(prev => prev.filter(t => t.id !== taskId));
 
-                    showToolResult(callName, null, String(err));
+                    if (!(callName === 'web_glance' && silenceFillerInFlightRef.current)) {
+                      showToolResult(callName, null, String(err));
+                    }
 
                     functionResponses.push({
                       id: call.id,
@@ -2557,6 +2606,7 @@ ${historyContext}
       lastUserSpeechAtRef.current = Date.now();
       silenceFillerCountRef.current = 0;
       silenceFillerInFlightRef.current = false;
+      lastSilenceFillerStyleRef.current = null;
       setIsActive(true);
       setConnecting(false);
       sessionStartingRef.current = false;
@@ -2580,6 +2630,7 @@ ${historyContext}
     isAgentSpeakingRef.current = false;
     silenceFillerInFlightRef.current = false;
     silenceFillerCountRef.current = 0;
+    lastSilenceFillerStyleRef.current = null;
 
     try {
       audioRecorderRef.current?.stop();
@@ -2588,6 +2639,8 @@ ${historyContext}
     try {
       audioStreamerRef.current?.stop();
     } catch (e) {}
+
+    stopAmbientBed();
 
     try {
       sessionRef.current?.close();
@@ -2666,7 +2719,14 @@ ${historyContext}
           <p className="text-[8px] sm:text-[9px] text-zinc-500 tracking-[0.22em] lowercase -mt-0.5">eburon ai</p>
         </div>
 
-        <div className="flex items-center">
+        <div className="flex items-center gap-2">
+          <a
+            href="/adminportal"
+            className="p-1.5 rounded-lg text-zinc-400 hover:text-[#d0a78b] hover:bg-zinc-800/50 transition-all duration-300"
+            aria-label="Open Admin Portal"
+          >
+            <Activity className="w-5 h-5 sm:w-6 sm:h-6" />
+          </a>
           <button
             onClick={() => setShowProfilePage(true)}
             className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-zinc-900 border border-zinc-800 overflow-hidden flex items-center justify-center hover:border-[#d0a78b]/50 transition-all duration-300"
@@ -2999,6 +3059,38 @@ ${historyContext}
                       Connect to enable Gmail, Calendar, Drive, Tasks, and YouTube capabilities.
                     </p>
                   )}
+                </div>
+
+                <div className="p-5 bg-white/5 border border-white/10 rounded-[24px] space-y-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-1">
+                        Room Tone
+                      </span>
+                      <span className="text-xs font-mono uppercase tracking-widest text-zinc-400">
+                        {ambientEnabled ? `Quiet ${ambientVolume}` : 'Off'}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setAmbientEnabled(v => !v)}
+                      aria-pressed={ambientEnabled}
+                      className={`w-11 h-6 rounded-full transition-all ${ambientEnabled ? 'bg-[#d0a78b]' : 'bg-zinc-700'}`}
+                    >
+                      <span className={`block w-4 h-4 rounded-full bg-white transition-all mt-1 ${ambientEnabled ? 'ml-6' : 'ml-1'}`} />
+                    </button>
+                  </div>
+
+                  <input
+                    type="range"
+                    min="0"
+                    max="30"
+                    step="1"
+                    value={ambientVolume}
+                    onChange={(e) => setAmbientVolume(parseInt(e.target.value, 10))}
+                    disabled={!ambientEnabled}
+                    className="w-full accent-amber-500 h-1.5 bg-white/5 rounded-lg appearance-none cursor-pointer disabled:opacity-40"
+                    aria-label="Room tone volume"
+                  />
                 </div>
 
                 <div className="p-5 bg-white/5 border border-white/10 rounded-[24px] space-y-4">
