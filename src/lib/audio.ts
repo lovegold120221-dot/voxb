@@ -103,10 +103,115 @@ export class AudioStreamer {
   }
 }
 
+export class AmbientConversationBed {
+  private audioContext: AudioContext | null = null;
+  private source: AudioBufferSourceNode | null = null;
+  private highpass: BiquadFilterNode | null = null;
+  private lowpass: BiquadFilterNode | null = null;
+  private gain: GainNode | null = null;
+  private baseVolume = 0.012;
+  private isDucked = false;
+
+  async start(volume = 0.012) {
+    this.baseVolume = this.clampVolume(volume);
+
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+      }
+      this.applyGain();
+      return;
+    }
+
+    this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const sampleRate = this.audioContext.sampleRate;
+    const buffer = this.audioContext.createBuffer(1, sampleRate * 8, sampleRate);
+    const channel = buffer.getChannelData(0);
+    let slowNoise = 0;
+
+    for (let i = 0; i < channel.length; i++) {
+      slowNoise = slowNoise * 0.985 + (Math.random() * 2 - 1) * 0.015;
+      channel[i] = slowNoise * 0.42;
+    }
+
+    this.source = this.audioContext.createBufferSource();
+    this.source.buffer = buffer;
+    this.source.loop = true;
+
+    this.highpass = this.audioContext.createBiquadFilter();
+    this.highpass.type = 'highpass';
+    this.highpass.frequency.value = 90;
+    this.highpass.Q.value = 0.2;
+
+    this.lowpass = this.audioContext.createBiquadFilter();
+    this.lowpass.type = 'lowpass';
+    this.lowpass.frequency.value = 520;
+    this.lowpass.Q.value = 0.35;
+
+    this.gain = this.audioContext.createGain();
+    this.gain.gain.value = 0;
+
+    this.source.connect(this.highpass);
+    this.highpass.connect(this.lowpass);
+    this.lowpass.connect(this.gain);
+    this.gain.connect(this.audioContext.destination);
+    this.source.start();
+    this.applyGain();
+  }
+
+  setVolume(volume: number) {
+    this.baseVolume = this.clampVolume(volume);
+    this.applyGain();
+  }
+
+  duck(shouldDuck: boolean) {
+    this.isDucked = shouldDuck;
+    this.applyGain();
+  }
+
+  private clampVolume(volume: number) {
+    return Math.max(0, Math.min(0.03, Number.isFinite(volume) ? volume : 0.012));
+  }
+
+  private applyGain() {
+    if (!this.audioContext || !this.gain) return;
+    const target = this.isDucked ? this.baseVolume * 0.18 : this.baseVolume;
+    this.gain.gain.setTargetAtTime(target, this.audioContext.currentTime, 0.35);
+  }
+
+  stop() {
+    if (this.source) {
+      try {
+        this.source.stop();
+      } catch (e) {}
+    }
+
+    [this.source, this.highpass, this.lowpass, this.gain].forEach(node => {
+      try {
+        node?.disconnect();
+      } catch (e) {}
+    });
+
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      try {
+        this.audioContext.close();
+      } catch (e) {}
+    }
+
+    this.audioContext = null;
+    this.source = null;
+    this.highpass = null;
+    this.lowpass = null;
+    this.gain = null;
+    this.isDucked = false;
+  }
+}
+
 export class AudioRecorder {
   private audioContext: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private processor: ScriptProcessorNode | null = null;
+  private silentSink: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
   private dataArray: Uint8Array | null = null;
   private onData: (base64: string) => void;
@@ -150,7 +255,10 @@ export class AudioRecorder {
     };
     
     this.analyser.connect(this.processor);
-    this.processor.connect(this.audioContext.destination);
+    this.silentSink = this.audioContext.createGain();
+    this.silentSink.gain.value = 0;
+    this.processor.connect(this.silentSink);
+    this.silentSink.connect(this.audioContext.destination);
   }
 
   getFrequencies(numBins: number = 5): number[] {
@@ -174,6 +282,16 @@ export class AudioRecorder {
         this.processor.disconnect();
       } catch (e) {}
     }
+    if (this.silentSink) {
+      try {
+        this.silentSink.disconnect();
+      } catch (e) {}
+    }
+    if (this.analyser) {
+      try {
+        this.analyser.disconnect();
+      } catch (e) {}
+    }
     if (this.stream) {
       this.stream.getTracks().forEach(track => {
         try {
@@ -188,5 +306,11 @@ export class AudioRecorder {
         console.error("Failed to close AudioContext:", e);
       }
     }
+    this.audioContext = null;
+    this.stream = null;
+    this.processor = null;
+    this.silentSink = null;
+    this.analyser = null;
+    this.dataArray = null;
   }
 }

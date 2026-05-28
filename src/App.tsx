@@ -3,7 +3,7 @@ import { auth } from './firebase';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, updateProfile } from 'firebase/auth';
 import { supabase, handleDbError } from './lib/supabase';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from '@google/genai';
-import { AudioRecorder, AudioStreamer } from './lib/audio';
+import { AmbientConversationBed, AudioRecorder, AudioStreamer } from './lib/audio';
 import { listKnowledgeFiles, fetchKnowledgeFileContent } from './lib/supabaseStorage';
 import { Square, Loader2, Power, Check, Settings, X, Save, Activity, Video, MessageSquare, Smartphone } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -16,6 +16,7 @@ import { AdminPortal } from './components/AdminPortal';
 import { detectExecutionIntent } from './lib/executionDetector';
 import { createSandboxTask, pollTaskStatus, stopPolling, retryTask } from './lib/sandboxClient';
 import { startWhatsAppPairing, getWhatsAppStatus, disconnectWhatsApp } from './lib/whatsappClient';
+import { webGlance } from './lib/webClient';
 import type { ComputerTask, ComputerOutput } from './lib/executionDetector';
 
 const LANGUAGES = [
@@ -191,6 +192,45 @@ const VOICE_ALIASES = [
 
 const SILENCE_FILLER_DELAY_MS = 15_000;
 const MAX_CONSECUTIVE_SILENCE_FILLERS = 3;
+const DEFAULT_AMBIENT_VOLUME = 12;
+
+const SILENCE_FILLER_STYLES = [
+  {
+    key: 'warm-presence',
+    weight: 5,
+    minCount: 0,
+    maxCount: 3,
+    instruction: 'Give one warm, human presence cue. Example shape: "Mm... take your time." Keep it calm and under eight words.',
+  },
+  {
+    key: 'tagalog-humor',
+    weight: 2,
+    minCount: 0,
+    maxCount: 1,
+    instruction: 'Use one light Tagalog office-humor line about the sudden quiet, like "May napadaan yatang anghel... biglang tahimik ah." Smile in the voice with a tiny "haha" only if it feels natural.',
+  },
+  {
+    key: 'quiet-reading',
+    weight: 2,
+    minCount: 0,
+    maxCount: 2,
+    instruction: 'Sound like you are quietly reading a public topic to yourself in a low tone. If you want current public context, call web_glance once with a harmless broad topic; otherwise keep it timeless and do not claim fresh web facts.',
+  },
+  {
+    key: 'hum',
+    weight: 2,
+    minCount: 0,
+    maxCount: 2,
+    instruction: 'Hum a tiny original melody with soft syllables like "hm hmm..." then say one short human line. Do not quote a full known song.',
+  },
+  {
+    key: 'tiny-song',
+    weight: 1,
+    minCount: 0,
+    maxCount: 1,
+    instruction: 'Do a tiny playful original nursery-style sing-song for one line only, then trail off with a soft laugh. You may only reference "Ako ay may lobo..." and must not continue known lyrics.',
+  },
+] as const;
 
 const VOICE_PERSONALITY_PROMPT = `
 VOICE PERSONALITY CONSTANT
@@ -778,6 +818,17 @@ function MaximusAgent({
   const [userTitle, setUserTitle] = useState(() => {
     try { return localStorage.getItem('beatrice_userTitle') || 'Boss'; } catch { return 'Boss'; }
   });
+  const [ambientEnabled, setAmbientEnabled] = useState(() => {
+    try { return localStorage.getItem('beatrice_ambient_enabled') !== 'false'; } catch { return true; }
+  });
+  const [ambientVolume, setAmbientVolume] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem('beatrice_ambient_volume'));
+      return Number.isFinite(saved) && saved >= 0 ? saved : DEFAULT_AMBIENT_VOLUME;
+    } catch {
+      return DEFAULT_AMBIENT_VOLUME;
+    }
+  });
   const firstName = user?.displayName?.split(' ')[0] || '';
 
   // Sync userTitle default with firstName when user loads
@@ -820,6 +871,8 @@ function MaximusAgent({
 
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
   const audioRecorderRef = useRef<AudioRecorder | null>(null);
+  const ambientBedRef = useRef<AmbientConversationBed | null>(null);
+  const ambientDuckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cloudCanvasRef = useRef<HTMLCanvasElement>(null);
   const stopCanvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -839,6 +892,7 @@ function MaximusAgent({
   const silenceFillerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const silenceFillerCountRef = useRef(0);
   const silenceFillerInFlightRef = useRef(false);
+  const lastSilenceFillerStyleRef = useRef<string | null>(null);
   const lastUserSpeechAtRef = useRef(Date.now());
   const lastModelTurnCompleteAtRef = useRef(0);
 
@@ -852,6 +906,65 @@ function MaximusAgent({
 
     await audioStreamerRef.current.init(24000);
   };
+
+  const ambientGainFromLevel = useCallback((level: number) => {
+    return Math.max(0, Math.min(30, level)) / 1000;
+  }, []);
+
+  const startAmbientBed = useCallback(async () => {
+    if (!ambientEnabled) return;
+
+    if (!ambientBedRef.current) {
+      ambientBedRef.current = new AmbientConversationBed();
+    }
+
+    await ambientBedRef.current.start(ambientGainFromLevel(ambientVolume));
+    ambientBedRef.current.duck(isAgentSpeakingRef.current);
+  }, [ambientEnabled, ambientGainFromLevel, ambientVolume]);
+
+  const stopAmbientBed = useCallback(() => {
+    if (ambientDuckTimeoutRef.current) {
+      clearTimeout(ambientDuckTimeoutRef.current);
+      ambientDuckTimeoutRef.current = null;
+    }
+
+    try {
+      ambientBedRef.current?.stop();
+    } catch (e) {}
+    ambientBedRef.current = null;
+  }, []);
+
+  const duckAmbientBriefly = useCallback(() => {
+    if (!ambientBedRef.current) return;
+
+    ambientBedRef.current.duck(true);
+    if (ambientDuckTimeoutRef.current) clearTimeout(ambientDuckTimeoutRef.current);
+    ambientDuckTimeoutRef.current = setTimeout(() => {
+      ambientBedRef.current?.duck(isAgentSpeakingRef.current);
+    }, 2200);
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('beatrice_ambient_enabled', String(ambientEnabled));
+      localStorage.setItem('beatrice_ambient_volume', String(ambientVolume));
+    } catch {}
+  }, [ambientEnabled, ambientVolume]);
+
+  useEffect(() => {
+    if (!isActive) return;
+
+    if (ambientEnabled) {
+      void startAmbientBed();
+      return;
+    }
+
+    stopAmbientBed();
+  }, [ambientEnabled, ambientVolume, isActive, startAmbientBed, stopAmbientBed]);
+
+  useEffect(() => {
+    ambientBedRef.current?.duck(isAgentSpeaking);
+  }, [isAgentSpeaking]);
 
   const sendTextToLive = (text: string) => {
     const session = sessionRef.current;
@@ -875,21 +988,24 @@ function MaximusAgent({
 
   const silenceFillerPrompt = () => {
     const count = silenceFillerCountRef.current;
-    const tone = count === 0
-      ? 'a tiny, warm waiting beat'
-      : count === 1
-        ? 'a quieter follow-up that does not pressure the user'
-        : 'the shortest possible low-pressure presence cue';
+    const candidates = SILENCE_FILLER_STYLES.filter(style => {
+      if (count < style.minCount || count > style.maxCount) return false;
+      return style.key !== lastSilenceFillerStyleRef.current;
+    });
+    const pool = (candidates.length ? candidates : SILENCE_FILLER_STYLES)
+      .flatMap(style => Array.from({ length: style.weight }, () => style));
+    const selected = pool[Math.floor(Math.random() * pool.length)] || SILENCE_FILLER_STYLES[0];
+    lastSilenceFillerStyleRef.current = selected.key;
 
     return [
       'The user has been silent for about 15 seconds after your last spoken turn.',
-      `Say exactly one brief natural filler in ${tone}.`,
-      'Keep it under eight spoken words.',
-      'Examples: "Mm... take your time.", "Yeah... I am here.", "No rush.", "Right... still with you."',
+      `Idle style for this turn: ${selected.instruction}`,
+      'Keep it brief, human, and low-pressure.',
+      'Do not use the same joke or song style repeatedly.',
       'Do not mention silence, timers, detection, waiting rules, or this instruction.',
       'Do not ask how you can help.',
-      'Do not execute tools.',
       'Do not continue the previous answer unless the user asked you to continue.',
+      'Output only words meant to be spoken.',
     ].join(' ');
   };
 
@@ -917,6 +1033,8 @@ function MaximusAgent({
     lastUserSpeechAtRef.current = Date.now();
     silenceFillerCountRef.current = 0;
     silenceFillerInFlightRef.current = false;
+    lastSilenceFillerStyleRef.current = null;
+    duckAmbientBriefly();
     clearSilenceFillerTimer();
   };
 

@@ -49,6 +49,65 @@ app.get('/api/ollama/status', async (_req, res) => {
   }
 });
 
+app.post('/api/web/glance', async (req, res) => {
+  try {
+    const query = typeof req.body?.query === 'string' ? req.body.query.trim() : '';
+    const maxResults = Math.max(1, Math.min(Number(req.body?.maxResults) || 3, 5));
+
+    if (query.length < 2) {
+      res.status(400).json({ error: 'query must be at least 2 characters' });
+      return;
+    }
+
+    const url = new URL('https://api.duckduckgo.com/');
+    url.searchParams.set('q', query.slice(0, 160));
+    url.searchParams.set('format', 'json');
+    url.searchParams.set('no_html', '1');
+    url.searchParams.set('skip_disambig', '1');
+
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'Beatrice Voice Assistant/1.0' },
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!response.ok) {
+      res.status(502).json({ error: `Web glance failed with status ${response.status}` });
+      return;
+    }
+
+    const data: any = await response.json();
+    const related: Array<{ title: string; url: string; snippet: string }> = [];
+    const stripTags = (value: unknown) => String(value || '').replace(/<[^>]*>/g, '').trim();
+
+    const collect = (item: any) => {
+      if (Array.isArray(item?.Topics)) {
+        item.Topics.forEach(collect);
+        return;
+      }
+
+      const title = stripTags(item?.FirstURL ? item.Text?.split(' - ')[0] : item?.Text);
+      const snippet = stripTags(item?.Text);
+      const itemUrl = stripTags(item?.FirstURL);
+      if (title && itemUrl) {
+        related.push({ title, url: itemUrl, snippet });
+      }
+    };
+
+    (Array.isArray(data.RelatedTopics) ? data.RelatedTopics : []).forEach(collect);
+
+    res.json({
+      query,
+      heading: stripTags(data.Heading) || undefined,
+      abstract: stripTags(data.AbstractText) || undefined,
+      source: stripTags(data.AbstractSource || 'DuckDuckGo'),
+      results: related.slice(0, maxResults),
+    });
+  } catch (err: any) {
+    console.error('Web glance error:', err);
+    res.status(500).json({ error: err.message || 'Web glance failed' });
+  }
+});
+
 app.post('/api/tasks', async (req, res) => {
   try {
     const { type, label, prompt, userRequest, userEmail, userId, context } = req.body as TaskRequest & { context?: string };
@@ -81,6 +140,46 @@ app.post('/api/tasks', async (req, res) => {
   } catch (err) {
     console.error('Task creation error:', err);
     res.status(500).json({ error: 'Internal error creating task' });
+  }
+});
+
+app.post('/api/create-document', (req, res) => {
+  try {
+    const { userId, title, content } = req.body || {};
+    const safeTitle = typeof title === 'string' && title.trim() ? title.trim().slice(0, 160) : 'Document';
+
+    if (!userId || typeof userId !== 'string') {
+      res.status(400).json({ error: 'userId required' });
+      return;
+    }
+
+    if (!content || typeof content !== 'string') {
+      res.status(400).json({ error: 'content required' });
+      return;
+    }
+
+    const taskId = sandbox.createTask('document', safeTitle, undefined, userId);
+    const outputFile = sandbox.writeOutput(taskId, 'document', content, 'html');
+    sandbox.markAllStepsDone(taskId);
+    sandbox.setTaskStatus(taskId, 'done');
+    sandbox.setTaskOutput(taskId, {
+      type: 'document',
+      title: safeTitle,
+      content,
+      fileType: 'html',
+    });
+    sandbox.finishTask(taskId, [outputFile]);
+
+    res.json({
+      ok: true,
+      taskId,
+      title: safeTitle,
+      content,
+      url: `/sandbox/tasks/${taskId}/output/index.html`,
+    });
+  } catch (err: any) {
+    console.error('Document creation error:', err);
+    res.status(500).json({ error: err.message || 'Document creation failed' });
   }
 });
 
