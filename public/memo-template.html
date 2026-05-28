@@ -160,6 +160,16 @@
             font-family: var(--font-sans)
         }
 
+        .signer-name {
+            font-weight: 700;
+            margin-top: 20px
+        }
+
+        .signer-title {
+            color: var(--muted);
+            font-size: .85rem
+        }
+
         .highlight {
             background: rgba(214, 158, 46, .08);
             border-bottom: 1px dashed var(--accent);
@@ -238,8 +248,8 @@
                 placeholder="Date"></div>
         <div class="form-group"><label>Subject</label><input type="text" id="memoSubj"
                 value="Updated Remote Work Policy — Effective 1 July" placeholder="Subject"></div>
-        <div class="form-group"><label>Message</label><textarea id="memoBody"
-                rows="5">Effective 1 July 2026, our remote work policy is updated to allow up to three days per week of remote work, subject to manager approval. All staff are required to be present in the office on Tuesdays and Thursdays for core collaboration days.\n\nPlease review the attached policy document and confirm receipt with your manager by 25 June.</textarea>
+        <div class="form-group"><label>Message</label><textarea id="memoBody" rows="5" title="Message content"
+                placeholder="Enter your message here">Effective 1 July 2026, our remote work policy is updated to allow up to three days per week of remote work, subject to manager approval. All staff are required to be present in the office on Tuesdays and Thursdays for core collaboration days.\n\nPlease review the attached policy document and confirm receipt with your manager by 25 June.</textarea>
         </div>
         <button class="btn-print" onclick="window.print()">Print / PDF</button>
     </div>
@@ -263,8 +273,8 @@
             </div>
             <div class="memo-closing">
                 <p>Best regards,</p>
-                <p style="font-weight:700;margin-top:20px">Joe Lernout</p>
-                <p style="color:var(--muted);font-size:.85rem">Chief Executive Officer</p>
+                <p class="signer-name">Joe Lernout</p>
+                <p class="signer-title">Chief Executive Officer</p>
             </div>
         </div>
     </div>

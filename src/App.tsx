@@ -1218,6 +1218,7 @@ function MaximusAgent({
 
     if (!text || !sessionRef.current || !isActive) return;
 
+    markUserSpeechActivity();
     userTranscriptRef.current = text;
     setUserTranscript(text);
     setMessages(prev => [...prev, { role: 'user', text, timestamp: new Date().toISOString(), sessionId: sessionIdRef.current }]);
@@ -1231,6 +1232,7 @@ function MaximusAgent({
     if (!sessionRef.current || !isActive) return;
 
     try {
+      markUserSpeechActivity();
       // 1. Upload to Supabase Storage
       const path = `${user.uid}/${Date.now()}_${file.name}`;
       const { error: uploadError } = await supabase.storage
@@ -2306,6 +2308,7 @@ ${historyContext}
 
               if (message.serverContent) {
                 if (message.serverContent.interrupted) {
+                  markUserSpeechActivity();
                   audioStreamerRef.current?.stop();
                   setIsAgentSpeaking(false);
                   return;
@@ -2317,6 +2320,7 @@ ${historyContext}
                   const text = content.inputTranscription.text.trim();
 
                   if (text) {
+                    markUserSpeechActivity();
                     userTranscriptRef.current = text;
                     setUserTranscript(text);
                     saveMessage('user', text);
@@ -2331,6 +2335,7 @@ ${historyContext}
                 }
 
                 if (content.outputTranscription?.text) {
+                  clearSilenceFillerTimer();
                   const text = content.outputTranscription.text;
                   const updatedText = (modelTranscriptRef.current + text).trim();
                   modelTranscriptRef.current = updatedText;
@@ -2348,6 +2353,7 @@ ${historyContext}
                 if (modelTurn?.parts) {
                   for (const part of modelTurn.parts) {
                     if (part.inlineData?.data) {
+                      clearSilenceFillerTimer();
                       audioStreamerRef.current?.addPCM16(part.inlineData.data);
                       setIsAgentSpeaking(true);
 
@@ -2356,6 +2362,7 @@ ${historyContext}
                     }
 
                     if ((part as any).text) {
+                      clearSilenceFillerTimer();
                       const text = (part as any).text;
                       const updatedText = (modelTranscriptRef.current + text).trim();
                       modelTranscriptRef.current = updatedText;
@@ -2376,6 +2383,7 @@ ${historyContext}
                   const text = legacyUserTurn.parts.map((p: any) => p.text).join(" ").trim();
 
                   if (text) {
+                    markUserSpeechActivity();
                     userTranscriptRef.current = text;
                     setUserTranscript(text);
                     saveMessage('user', text);
@@ -2390,12 +2398,19 @@ ${historyContext}
 
                 if ((message.serverContent as any).turnComplete) {
                   const current = modelTranscriptRef.current;
+                  const isSilenceFillerTurn = silenceFillerInFlightRef.current;
 
                   if (current) {
-                    setMessages(prev => [...prev, { role: 'model', text: current, timestamp: new Date().toISOString(), sessionId: sessionIdRef.current }]);
-                    saveMessage('model', current);
+                    if (!isSilenceFillerTurn) {
+                      setMessages(prev => [...prev, { role: 'model', text: current, timestamp: new Date().toISOString(), sessionId: sessionIdRef.current }]);
+                      saveMessage('model', current);
+                    }
                     modelTranscriptRef.current = '';
                   }
+
+                  silenceFillerInFlightRef.current = false;
+                  lastModelTurnCompleteAtRef.current = Date.now();
+                  scheduleSilenceFiller();
                 }
               }
           },
@@ -2420,6 +2435,10 @@ ${historyContext}
 
       await audioRecorderRef.current.start();
 
+      isActiveRef.current = true;
+      lastUserSpeechAtRef.current = Date.now();
+      silenceFillerCountRef.current = 0;
+      silenceFillerInFlightRef.current = false;
       setIsActive(true);
       setConnecting(false);
       sessionStartingRef.current = false;
@@ -2438,6 +2457,12 @@ ${historyContext}
   };
 
   const stopSession = () => {
+    clearSilenceFillerTimer();
+    isActiveRef.current = false;
+    isAgentSpeakingRef.current = false;
+    silenceFillerInFlightRef.current = false;
+    silenceFillerCountRef.current = 0;
+
     try {
       audioRecorderRef.current?.stop();
     } catch (e) {}
