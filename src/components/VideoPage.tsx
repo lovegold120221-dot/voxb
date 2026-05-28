@@ -8,7 +8,7 @@ interface VideoPageProps {
   toggleCamera: () => void;
   facingMode: 'user' | 'environment';
   onSwitchCamera: (mode: 'user' | 'environment') => void;
-  videoRef: React.RefObject<HTMLVideoElement | null>;
+  cameraStream: MediaStream | null;
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   isActive: boolean;
   sendVideoToLive: (base64Data: string) => void;
@@ -21,7 +21,7 @@ export function VideoPage({
   toggleCamera,
   facingMode,
   onSwitchCamera,
-  videoRef,
+  cameraStream,
   canvasRef,
   isActive,
   sendVideoToLive,
@@ -39,10 +39,10 @@ export function VideoPage({
   const isRecording = isCameraActive || isSharingScreen;
 
   useEffect(() => {
-    if (isCameraActive && videoRef.current && localVideoRef.current && !isSharingScreen) {
-      localVideoRef.current.srcObject = videoRef.current.srcObject;
+    if (localVideoRef.current && cameraStream && !isSharingScreen) {
+      localVideoRef.current.srcObject = cameraStream;
     }
-  }, [isCameraActive, videoRef.current?.srcObject, isSharingScreen]);
+  }, [cameraStream, isSharingScreen]);
 
   useEffect(() => {
     if (!isActive) {
@@ -106,8 +106,8 @@ export function VideoPage({
       }
       setIsSharingScreen(false);
       sendTextToLive("The user stopped sharing their screen.");
-      if (localVideoRef.current && isCameraActive && videoRef.current) {
-        localVideoRef.current.srcObject = videoRef.current.srcObject;
+      if (localVideoRef.current && isCameraActive && cameraStream) {
+        localVideoRef.current.srcObject = cameraStream;
       } else if (localVideoRef.current) {
         localVideoRef.current.srcObject = null;
       }
@@ -134,8 +134,8 @@ export function VideoPage({
           screenIntervalRef.current = null;
         }
         sendTextToLive("The user stopped sharing their screen.");
-        if (localVideoRef.current && isCameraActive && videoRef.current) {
-          localVideoRef.current.srcObject = videoRef.current.srcObject;
+        if (localVideoRef.current && isCameraActive && cameraStream) {
+          localVideoRef.current.srcObject = cameraStream;
         } else if (localVideoRef.current) {
           localVideoRef.current.srcObject = null;
         }

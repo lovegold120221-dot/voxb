@@ -699,6 +699,7 @@ function MaximusAgent({
   const [volumes, setVolumes] = useState<number[]>(Array(11).fill(0.05));
 
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [showVideoPage, setShowVideoPage] = useState(false);
   const [showChatPage, setShowChatPage] = useState(false);
@@ -823,6 +824,7 @@ function MaximusAgent({
 
   const toggleCamera = async () => {
     if (isCameraActive) {
+      setCameraStream(null);
       if (videoStreamRef.current) {
         videoStreamRef.current.getTracks().forEach(t => t.stop());
         videoStreamRef.current = null;
@@ -844,6 +846,7 @@ function MaximusAgent({
       });
 
       videoStreamRef.current = stream;
+      setCameraStream(stream);
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -889,6 +892,7 @@ function MaximusAgent({
         video: { facingMode: mode, width: 640, height: 480 }
       });
       videoStreamRef.current = stream;
+      setCameraStream(stream);
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
@@ -2196,6 +2200,7 @@ ${historyContext}
       </footer>
 
       <canvas ref={canvasRef} className="hidden" />
+      <video ref={videoRef} className="hidden" autoPlay playsInline muted />
 
       <AnimatePresence>
         {showChatPage && (
@@ -2223,7 +2228,7 @@ ${historyContext}
             toggleCamera={toggleCamera}
             facingMode={facingMode}
             onSwitchCamera={switchCameraMode}
-            videoRef={videoRef}
+            cameraStream={cameraStream}
             canvasRef={canvasRef}
             isActive={isActive}
             sendVideoToLive={sendVideoToLive}
