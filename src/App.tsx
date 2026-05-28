@@ -393,7 +393,7 @@ export default function App() {
               .from('user_settings')
               .insert({
                 user_id: u.uid,
-                persona_name: 'Beatrice',
+                persona_name: 'Eburon AI Beatrice',
                 selected_voice: 'Aoede',
                 custom_prompt: '',
                 context_size: 20,
@@ -698,7 +698,7 @@ function MaximusAgent({
   const [computerOutput, setComputerOutput] = useState<{ content: string; title: string } | null>(null);
   const [computerPreviewUrl, setComputerPreviewUrl] = useState<string | null>(null);
   const [computerDownloadUrl, setComputerDownloadUrl] = useState<string | null>(null);
-  const [personaName, setPersonaName] = useState("Beatrice");
+  const [personaName, setPersonaName] = useState("Eburon AI Beatrice");
   const [customPrompt, setCustomPrompt] = useState("");
   const [selectedVoice, setSelectedVoice] = useState("Aoede");
   const [contextSize, setContextSize] = useState(20);
@@ -2003,7 +2003,7 @@ ${historyContext}
       <main className="flex-1 flex flex-col items-center justify-start relative z-10 pt-4 pb-24 overflow-hidden">
 
         <p className="text-zinc-300 text-sm font-normal tracking-wide mt-2 px-6 text-center transition-all duration-300">
-          {isActive ? 'Beatrice is listening...' : connecting ? 'Connecting...' : 'Beatrice is offline. Connect to begin.'}
+          {isActive ? 'Beatrice is listening...' : connecting ? 'Connecting...' : 'Beatrice is offline. Tap to Start.'}
         </p>
 
         <div className="relative flex-1 flex items-center justify-center w-full max-h-[300px] mt-6">
