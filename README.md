@@ -218,6 +218,25 @@ flowchart TB
 | `src/lib/supabase.ts` | Supabase client + `handleDbError()` |
 | `src/lib/supabaseStorage.ts` | Avatar, knowledge files, domain CRUD |
 | `src/components/ProfilePage.tsx` | Avatar, file upload, URL domains |
+
+## WhatsApp Backend
+
+WhatsApp personal-account sessions are handled server-side with Baileys (`@whiskeysockets/baileys`). Each app user gets an isolated auth directory under `WA_AUTH_ROOT`, so multiple users can pair and reconnect independently without sharing a browser or session.
+
+Required backend env:
+
+```bash
+SANDBOX_ROOT=./.sandbox
+WA_AUTH_ROOT=./.baileys_auth
+VITE_SANDBOX_URL=http://localhost:4200
+```
+
+Pairing flow:
+
+1. Start the Express backend with a writable `SANDBOX_ROOT` and `WA_AUTH_ROOT`.
+2. In Agent Settings, click `Pair WhatsApp`.
+3. Scan the QR code from WhatsApp Linked Devices.
+4. Enable only the WhatsApp permission toggles the user wants the assistant to use.
 | `src/components/VideoPage.tsx` | Camera + screen share |
 | `src/components/ComputerPage.tsx` | Document preview + download |
 | `src/components/KaraokeTranscript.tsx` | Word-by-word animated transcript |

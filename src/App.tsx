@@ -1794,12 +1794,15 @@ ${historyContext}
                     type: Type.OBJECT,
                     properties: {
                       action: { type: Type.STRING, description: "The WhatsApp action: sendMessage, readChats, getContacts, addContact, getGroups, sendGroupMessage, readGroupChat, getMessageHistory" },
-                      to: { type: Type.STRING, description: "Recipient phone number (for sendMessage, addContact)" },
+                      to: { type: Type.STRING, description: "Recipient phone number or JID (for sendMessage, addContact, getMessageHistory)" },
                       text: { type: Type.STRING, description: "Message text (for sendMessage, sendGroupMessage)" },
                       name: { type: Type.STRING, description: "Contact/group name (for addContact, getMessageHistory)" },
-                      chatId: { type: Type.STRING, description: "Chat/group ID (for readGroupChat)" },
-                      groupName: { type: Type.STRING, description: "Group name (for sendGroupMessage)" },
-                      contactId: { type: Type.STRING, description: "Contact ID (for readChats)" }
+                      number: { type: Type.STRING, description: "Contact phone number (for addContact)" },
+                      chatId: { type: Type.STRING, description: "Chat JID or phone number (for getMessageHistory, readGroupChat)" },
+                      groupId: { type: Type.STRING, description: "Group JID ending in @g.us (for sendGroupMessage, readGroupChat)" },
+                      groupName: { type: Type.STRING, description: "Group identifier if the exact group JID is known" },
+                      contactId: { type: Type.STRING, description: "Contact JID or phone number (for getMessageHistory)" },
+                      limit: { type: Type.NUMBER, description: "Maximum records to return. Maximum 50." }
                     },
                     required: ["action"]
                   }
@@ -1968,7 +1971,9 @@ ${historyContext}
                           name: args.name,
                           number: args.number,
                           groupId: args.groupId,
+                          groupName: args.groupName,
                           chatId: args.chatId,
+                          contactId: args.contactId,
                           limit: args.limit,
                         }, waPermissions);
                       } catch (e: any) {

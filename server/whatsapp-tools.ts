@@ -1,4 +1,5 @@
 import type { WhatsAppManager } from './whatsapp';
+import { toWhatsAppJid } from './whatsapp';
 
 const ALL_PERMISSIONS = [
   'send_messages',
@@ -13,10 +14,22 @@ const ALL_PERMISSIONS = [
 
 type Permission = typeof ALL_PERMISSIONS[number];
 
-function requirePerm(permissions: Record<string, boolean> | undefined, perm: Permission, action: string): string | null {
+function requirePerm(permissions: Record<string, boolean> | undefined, perm: Permission): string | null {
   if (!permissions?.[perm]) {
     return `Permission denied: "${perm}" is not enabled. User must enable this toggle in settings.`;
   }
+  return null;
+}
+
+function cleanLimit(limit: unknown, fallback = 20): number {
+  const parsed = Number(limit);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(Math.floor(parsed), 50);
+}
+
+function requireText(value: unknown, label: string): string | null {
+  const text = String(value || '').trim();
+  if (!text) return `${label} required`;
   return null;
 }
 
@@ -26,19 +39,24 @@ export async function handleSendMessage(
   permissions: Record<string, boolean> | undefined,
   to: string,
   text: string,
-): Promise<{ ok: true; sent: boolean } | { ok: false; error: string }> {
-  const denied = requirePerm(permissions, 'send_messages', 'send message');
+): Promise<{ ok: true; sent: boolean; chatId: string; messageId?: string } | { ok: false; error: string }> {
+  const denied = requirePerm(permissions, 'send_messages');
   if (denied) return { ok: false, error: denied };
 
-  const client = wa.getClient(userId);
-  if (!client) return { ok: false, error: 'WhatsApp not paired' };
+  const recipientError = requireText(to, 'Recipient');
+  if (recipientError) return { ok: false, error: recipientError };
+  const textError = requireText(text, 'Message text');
+  if (textError) return { ok: false, error: textError };
+
+  const sock = wa.getClient(userId);
+  if (!sock) return { ok: false, error: 'WhatsApp not paired' };
 
   try {
-    const chatId = to.includes('@c.us') || to.includes('@g.us') ? to : `${to}@c.us`;
-    await client.sendMessage(chatId, text);
-    return { ok: true, sent: true };
-  } catch (e: any) {
-    return { ok: false, error: e.message || 'Send failed' };
+    const chatId = toWhatsAppJid(to);
+    const sent = await sock.sendMessage(chatId, { text });
+    return { ok: true, sent: true, chatId, messageId: sent?.key?.id };
+  } catch (error: any) {
+    return { ok: false, error: error.message || 'Send failed' };
   }
 }
 
@@ -48,25 +66,10 @@ export async function handleReadChats(
   permissions: Record<string, boolean> | undefined,
   limit: number = 20,
 ): Promise<{ ok: true; chats: any[] } | { ok: false; error: string }> {
-  const denied = requirePerm(permissions, 'read_chats', 'read chats');
+  const denied = requirePerm(permissions, 'read_chats');
   if (denied) return { ok: false, error: denied };
-
-  const client = wa.getClient(userId);
-  if (!client) return { ok: false, error: 'WhatsApp not paired' };
-
-  try {
-    const chats = await client.getChats();
-    const recent = chats.slice(0, Math.min(limit, 50));
-    return { ok: true, chats: recent.map((c: any) => ({
-      id: c.id?._serialized || '',
-      name: c.name || 'Unknown',
-      unreadCount: c.unreadCount || 0,
-      lastMessage: c.lastMessage?.body?.slice(0, 120) || '',
-      timestamp: c.timestamp,
-    }))};
-  } catch (e: any) {
-    return { ok: false, error: e.message || 'Failed to read chats' };
-  }
+  if (!wa.isPaired(userId)) return { ok: false, error: 'WhatsApp not paired' };
+  return { ok: true, chats: wa.getChats(userId, cleanLimit(limit)) };
 }
 
 export async function handleGetContacts(
@@ -74,46 +77,29 @@ export async function handleGetContacts(
   userId: string,
   permissions: Record<string, boolean> | undefined,
 ): Promise<{ ok: true; contacts: any[] } | { ok: false; error: string }> {
-  const denied = requirePerm(permissions, 'access_contacts', 'access contacts');
+  const denied = requirePerm(permissions, 'access_contacts');
   if (denied) return { ok: false, error: denied };
-
-  const client = wa.getClient(userId);
-  if (!client) return { ok: false, error: 'WhatsApp not paired' };
-
-  try {
-    const contacts = await client.getContacts();
-    const filtered = contacts.filter((c: any) => c.id?._serialized?.includes('@c.us'));
-    return { ok: true, contacts: filtered.map((c: any) => ({
-      id: c.id?._serialized || '',
-      name: c.name || c.pushname || 'Unknown',
-      number: c.number || '',
-      isMyContact: !!c.isMyContact,
-    }))};
-  } catch (e: any) {
-    return { ok: false, error: e.message || 'Failed to get contacts' };
-  }
+  if (!wa.isPaired(userId)) return { ok: false, error: 'WhatsApp not paired' };
+  return { ok: true, contacts: wa.getContacts(userId) };
 }
 
 export async function handleAddContact(
-  wa: WhatsAppManager,
-  userId: string,
+  _wa: WhatsAppManager,
+  _userId: string,
   permissions: Record<string, boolean> | undefined,
   name: string,
   number: string,
 ): Promise<{ ok: true; added: boolean } | { ok: false; error: string }> {
-  const denied = requirePerm(permissions, 'manage_contacts', 'manage contacts');
+  const denied = requirePerm(permissions, 'manage_contacts');
   if (denied) return { ok: false, error: denied };
-
-  const client = wa.getClient(userId);
-  if (!client) return { ok: false, error: 'WhatsApp not paired' };
-
-  try {
-    const contactId = number.includes('@c.us') ? number : `${number}@c.us`;
-    await client.addContact(contactId, name);
-    return { ok: true, added: true };
-  } catch (e: any) {
-    return { ok: false, error: e.message || 'Failed to add contact' };
-  }
+  const nameError = requireText(name, 'Contact name');
+  if (nameError) return { ok: false, error: nameError };
+  const numberError = requireText(number, 'Contact number');
+  if (numberError) return { ok: false, error: numberError };
+  return {
+    ok: false,
+    error: 'Adding contacts is not exposed by Baileys as a reliable WhatsApp Web operation. Save the contact on the device, then refresh contacts.',
+  };
 }
 
 export async function handleGetGroups(
@@ -121,23 +107,14 @@ export async function handleGetGroups(
   userId: string,
   permissions: Record<string, boolean> | undefined,
 ): Promise<{ ok: true; groups: any[] } | { ok: false; error: string }> {
-  const denied = requirePerm(permissions, 'access_groups', 'access groups');
+  const denied = requirePerm(permissions, 'access_groups');
   if (denied) return { ok: false, error: denied };
-
-  const client = wa.getClient(userId);
-  if (!client) return { ok: false, error: 'WhatsApp not paired' };
-
+  if (!wa.isPaired(userId)) return { ok: false, error: 'WhatsApp not paired' };
   try {
-    const chats = await client.getChats();
-    const groups = chats.filter((c: any) => c.id?._serialized?.includes('@g.us'));
-    return { ok: true, groups: groups.map((g: any) => ({
-      id: g.id?._serialized || '',
-      name: g.name || 'Unnamed Group',
-      participantCount: g.participants?.length || 0,
-      unreadCount: g.unreadCount || 0,
-    }))};
-  } catch (e: any) {
-    return { ok: false, error: e.message || 'Failed to get groups' };
+    const groups = await wa.getGroups(userId);
+    return { ok: true, groups };
+  } catch (error: any) {
+    return { ok: false, error: error.message || 'Failed to get groups' };
   }
 }
 
@@ -147,19 +124,24 @@ export async function handleSendGroupMessage(
   permissions: Record<string, boolean> | undefined,
   groupId: string,
   text: string,
-): Promise<{ ok: true; sent: boolean } | { ok: false; error: string }> {
-  const denied = requirePerm(permissions, 'send_group_messages', 'send group messages');
+): Promise<{ ok: true; sent: boolean; groupId: string; messageId?: string } | { ok: false; error: string }> {
+  const denied = requirePerm(permissions, 'send_group_messages');
   if (denied) return { ok: false, error: denied };
 
-  const client = wa.getClient(userId);
-  if (!client) return { ok: false, error: 'WhatsApp not paired' };
+  const groupError = requireText(groupId, 'Group ID');
+  if (groupError) return { ok: false, error: groupError };
+  const textError = requireText(text, 'Message text');
+  if (textError) return { ok: false, error: textError };
+
+  const sock = wa.getClient(userId);
+  if (!sock) return { ok: false, error: 'WhatsApp not paired' };
 
   try {
-    const gid = groupId.includes('@g.us') ? groupId : `${groupId}@g.us`;
-    await client.sendMessage(gid, text);
-    return { ok: true, sent: true };
-  } catch (e: any) {
-    return { ok: false, error: e.message || 'Failed to send group message' };
+    const jid = toWhatsAppJid(groupId, true);
+    const sent = await sock.sendMessage(jid, { text });
+    return { ok: true, sent: true, groupId: jid, messageId: sent?.key?.id };
+  } catch (error: any) {
+    return { ok: false, error: error.message || 'Failed to send group message' };
   }
 }
 
@@ -170,27 +152,12 @@ export async function handleReadGroupChat(
   groupId: string,
   limit: number = 20,
 ): Promise<{ ok: true; messages: any[] } | { ok: false; error: string }> {
-  const denied = requirePerm(permissions, 'read_group_chats', 'read group chats');
+  const denied = requirePerm(permissions, 'read_group_chats');
   if (denied) return { ok: false, error: denied };
-
-  const client = wa.getClient(userId);
-  if (!client) return { ok: false, error: 'WhatsApp not paired' };
-  if (!groupId) return { ok: false, error: 'Group ID required' };
-
-  try {
-    const gid = groupId.includes('@g.us') ? groupId : `${groupId}@g.us`;
-    const chat = await client.getChatById(gid);
-    const msgs = await chat.fetchMessages({ limit: Math.min(limit, 50) });
-    return { ok: true, messages: msgs.map((m: any) => ({
-      from: m.from || '',
-      author: m.author || m.from || '',
-      body: m.body?.slice(0, 300) || '',
-      timestamp: m.timestamp,
-      isMedia: !!m.hasMedia,
-    }))};
-  } catch (e: any) {
-    return { ok: false, error: e.message || 'Failed to read group chat' };
-  }
+  if (!wa.isPaired(userId)) return { ok: false, error: 'WhatsApp not paired' };
+  const groupError = requireText(groupId, 'Group ID');
+  if (groupError) return { ok: false, error: groupError };
+  return { ok: true, messages: wa.getMessageHistory(userId, toWhatsAppJid(groupId, true), cleanLimit(limit)) };
 }
 
 export async function handleGetMessageHistory(
@@ -200,25 +167,10 @@ export async function handleGetMessageHistory(
   chatId: string,
   limit: number = 20,
 ): Promise<{ ok: true; messages: any[] } | { ok: false; error: string }> {
-  const denied = requirePerm(permissions, 'view_message_history', 'view message history');
+  const denied = requirePerm(permissions, 'view_message_history');
   if (denied) return { ok: false, error: denied };
-
-  const client = wa.getClient(userId);
-  if (!client) return { ok: false, error: 'WhatsApp not paired' };
-
-  try {
-    const cid = chatId.includes('@c.us') || chatId.includes('@g.us') ? chatId : `${chatId}@c.us`;
-    const chat = await client.getChatById(cid);
-    const msgs = await chat.fetchMessages({ limit: Math.min(limit, 50) });
-    return { ok: true, messages: msgs.map((m: any) => ({
-      from: m.from || '',
-      author: m.author || m.from || '',
-      body: m.body?.slice(0, 500) || '',
-      timestamp: m.timestamp,
-      isMedia: !!m.hasMedia,
-      isForwarded: !!m.isForwarded,
-    }))};
-  } catch (e: any) {
-    return { ok: false, error: e.message || 'Failed to get message history' };
-  }
+  if (!wa.isPaired(userId)) return { ok: false, error: 'WhatsApp not paired' };
+  const chatError = requireText(chatId, 'Chat ID');
+  if (chatError) return { ok: false, error: chatError };
+  return { ok: true, messages: wa.getMessageHistory(userId, chatId, cleanLimit(limit)) };
 }

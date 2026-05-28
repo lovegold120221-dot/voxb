@@ -233,9 +233,9 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
 
 app.post('/api/whatsapp/send', async (req, res) => {
   try {
-    const { userId, to, text } = req.body;
+    const { userId, to, text, permissions } = req.body;
     if (!userId || !to || !text) { res.status(400).json({ error: 'userId, to, text required' }); return; }
-    const result = await waTools.handleSendMessage(waManager, userId, undefined, to, text);
+    const result = await waTools.handleSendMessage(waManager, userId, permissions, to, text);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -244,7 +244,8 @@ app.post('/api/whatsapp/send', async (req, res) => {
 
 app.post('/api/whatsapp/tool', async (req, res) => {
   try {
-    const { userId, tool, params, permissions } = req.body;
+    const { userId, tool, permissions } = req.body;
+    const params = req.body.params || {};
     if (!userId || !tool) { res.status(400).json({ error: 'userId and tool required' }); return; }
 
     let result: any;
@@ -259,19 +260,19 @@ app.post('/api/whatsapp/tool', async (req, res) => {
         result = await waTools.handleGetContacts(waManager, userId, permissions);
         break;
       case 'addContact':
-        result = await waTools.handleAddContact(waManager, userId, permissions, params.name, params.number);
+        result = await waTools.handleAddContact(waManager, userId, permissions, params.name, params.number || params.to);
         break;
       case 'getGroups':
         result = await waTools.handleGetGroups(waManager, userId, permissions);
         break;
       case 'sendGroupMessage':
-        result = await waTools.handleSendGroupMessage(waManager, userId, permissions, params.groupId, params.text);
+        result = await waTools.handleSendGroupMessage(waManager, userId, permissions, params.groupId || params.chatId || params.groupName, params.text);
         break;
       case 'readGroupChat':
-        result = await waTools.handleReadGroupChat(waManager, userId, permissions, params.groupId, params.limit);
+        result = await waTools.handleReadGroupChat(waManager, userId, permissions, params.groupId || params.chatId || params.groupName, params.limit);
         break;
       case 'getMessageHistory':
-        result = await waTools.handleGetMessageHistory(waManager, userId, permissions, params.chatId, params.limit);
+        result = await waTools.handleGetMessageHistory(waManager, userId, permissions, params.chatId || params.contactId || params.to || params.name, params.limit);
         break;
       default:
         res.status(400).json({ error: `Unknown tool: ${tool}` });

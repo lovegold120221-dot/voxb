@@ -1,7 +1,7 @@
 const SANDBOX_URL = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SANDBOX_URL)
   || 'http://168.231.78.113';
 
-export async function startWhatsAppPairing(userId: string): Promise<{ pairingCode: string }> {
+export async function startWhatsAppPairing(userId: string): Promise<{ pairingCode: string; status?: string }> {
   const res = await fetch(`${SANDBOX_URL}/api/whatsapp/pair`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -33,11 +33,16 @@ export async function disconnectWhatsApp(userId: string): Promise<void> {
   });
 }
 
-export async function sendWhatsAppMessage(userId: string, to: string, text: string): Promise<any> {
+export async function sendWhatsAppMessage(
+  userId: string,
+  to: string,
+  text: string,
+  permissions?: Record<string, boolean>,
+): Promise<any> {
   const res = await fetch(`${SANDBOX_URL}/api/whatsapp/send`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, to, text }),
+    body: JSON.stringify({ userId, to, text, permissions }),
   });
   return res.json();
 }

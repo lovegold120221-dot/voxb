@@ -1,118 +1,284 @@
-import { randomBytes } from 'crypto';
+import { Boom } from '@hapi/boom';
+import makeWASocket, {
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
+  useMultiFileAuthState,
+} from '@whiskeysockets/baileys';
 import fs from 'fs';
 import path from 'path';
+import P from 'pino';
+import QRCode from 'qrcode';
 
-interface WaClient {
+type WaStatus = 'init' | 'qr_ready' | 'paired' | 'disconnected' | 'error';
+
+export interface WaRecentMessage {
+  id: string;
+  chatId: string;
+  from: string;
+  body: string;
+  timestamp: number;
+  fromMe: boolean;
+  isGroup: boolean;
+  isMedia: boolean;
+}
+
+export interface WaChatSummary {
+  id: string;
+  name: string;
+  unreadCount: number;
+  lastMessage: string;
+  timestamp: number;
+  isGroup: boolean;
+}
+
+export interface WaContactSummary {
+  id: string;
+  name: string;
+  number: string;
+}
+
+interface WaSession {
   userId: string;
-  status: 'init' | 'qr_ready' | 'paired' | 'disconnected';
+  status: WaStatus;
   qrCode: string | null;
+  qrRaw: string | null;
   phone: string | null;
-  client: any | null;
-  pairingCode: string;
+  sock: any | null;
+  authDir: string;
+  dataFile: string;
   error: string | null;
-  recentMessages: Array<{ from: string; body: string; timestamp: number }>;
+  recentMessages: WaRecentMessage[];
+  contacts: Record<string, WaContactSummary>;
+  messageById: Map<string, any>;
+  reconnecting: boolean;
+  saveTimer: NodeJS.Timeout | null;
+}
+
+const logger = P({ level: process.env.WA_LOG_LEVEL || 'silent' });
+
+function ensureDir(dir: string) {
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+function safeUserId(userId: string): string {
+  return userId.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function messageText(message: any): string {
+  const m = message?.message;
+  if (!m) return '';
+  return (
+    m.conversation ||
+    m.extendedTextMessage?.text ||
+    m.imageMessage?.caption ||
+    m.videoMessage?.caption ||
+    m.documentMessage?.caption ||
+    m.buttonsResponseMessage?.selectedDisplayText ||
+    m.listResponseMessage?.title ||
+    ''
+  );
+}
+
+function timestampMs(value: any): number {
+  if (!value) return Date.now();
+  if (typeof value === 'number') return value > 10_000_000_000 ? value : value * 1000;
+  if (typeof value?.toNumber === 'function') return value.toNumber() * 1000;
+  return Date.now();
+}
+
+export function toWhatsAppJid(value: string, group = false): string {
+  const input = String(value || '').trim();
+  if (!input) return '';
+  if (input.includes('@s.whatsapp.net') || input.includes('@g.us') || input.includes('@broadcast')) {
+    return input;
+  }
+  const cleaned = input.replace(/[^\d-]/g, '');
+  if (!cleaned) return input;
+  return `${cleaned}@${group ? 'g.us' : 's.whatsapp.net'}`;
+}
+
+function jidNumber(jid: string): string {
+  return jid.split('@')[0] || jid;
+}
+
+function readSessionData(dataFile: string): Pick<WaSession, 'recentMessages' | 'contacts'> {
+  try {
+    if (!fs.existsSync(dataFile)) return { recentMessages: [], contacts: {} };
+    const parsed = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    return {
+      recentMessages: Array.isArray(parsed.recentMessages) ? parsed.recentMessages : [],
+      contacts: parsed.contacts && typeof parsed.contacts === 'object' ? parsed.contacts : {},
+    };
+  } catch {
+    return { recentMessages: [], contacts: {} };
+  }
+}
+
+function writeSessionData(entry: WaSession) {
+  const payload = {
+    recentMessages: entry.recentMessages.slice(0, 250),
+    contacts: entry.contacts,
+  };
+  fs.writeFileSync(entry.dataFile, JSON.stringify(payload, null, 2));
 }
 
 export class WhatsAppManager {
-  private clients = new Map<string, WaClient>();
-  private browser: any = null;
+  private sessions = new Map<string, WaSession>();
+  private authRoot = process.env.WA_AUTH_ROOT || path.join(process.cwd(), '.baileys_auth');
 
-  async getBrowser() {
-    if (this.browser) return this.browser;
-    try {
-      const { default: puppeteer } = await import('puppeteer');
-      this.browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-      });
-      return this.browser;
-    } catch (e) {
-      console.error('Failed to launch browser for WhatsApp:', e);
-      return null;
+  async startPairing(userId: string): Promise<{ pairingCode: string; status: string }> {
+    const existing = this.sessions.get(userId);
+    if (existing && ['init', 'qr_ready', 'paired'].includes(existing.status)) {
+      return { pairingCode: safeUserId(userId), status: existing.status };
     }
+
+    await this.startSession(userId);
+    return { pairingCode: safeUserId(userId), status: this.sessions.get(userId)?.status || 'init' };
   }
 
-  async startPairing(userId: string): Promise<{ pairingCode: string } | { error: string }> {
-    const existing = this.clients.get(userId);
-    if (existing && (existing.status === 'init' || existing.status === 'qr_ready' || existing.status === 'paired')) {
-      return { pairingCode: existing.pairingCode };
-    }
+  async startSession(userId: string): Promise<void> {
+    const safeId = safeUserId(userId);
+    const authDir = path.join(this.authRoot, safeId);
+    const dataFile = path.join(authDir, 'session-data.json');
+    ensureDir(authDir);
 
-    const pairingCode = randomBytes(8).toString('hex');
-    const entry: WaClient = {
+    const { state, saveCreds } = await useMultiFileAuthState(authDir);
+    const { version } = await fetchLatestBaileysVersion();
+    const savedData = readSessionData(dataFile);
+
+    const entry: WaSession = {
       userId,
       status: 'init',
       qrCode: null,
+      qrRaw: null,
       phone: null,
-      client: null,
-      pairingCode,
+      sock: null,
+      authDir,
+      dataFile,
       error: null,
-      recentMessages: [],
+      recentMessages: savedData.recentMessages,
+      contacts: savedData.contacts,
+      messageById: new Map(),
+      reconnecting: false,
+      saveTimer: null,
     };
-    this.clients.set(userId, entry);
 
-    try {
-      const { Client, LocalAuth } = await import('whatsapp-web.js');
-      const browser = await this.getBrowser();
-      if (!browser) {
-        return { error: 'Failed to launch browser' };
+    this.sessions.set(userId, entry);
+
+    const sock = makeWASocket({
+      version,
+      logger,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger),
+      },
+      generateHighQualityLinkPreview: true,
+      markOnlineOnConnect: false,
+      syncFullHistory: false,
+      getMessage: async (key) => {
+        const jid = key.remoteJid;
+        const id = key.id;
+        if (!jid || !id) return undefined;
+        return entry.messageById.get(`${jid}:${id}`)?.message;
+      },
+    });
+
+    entry.sock = sock;
+    entry.saveTimer = setInterval(() => {
+      try {
+        writeSessionData(entry);
+      } catch (error) {
+        console.warn(`Failed to write WhatsApp data for ${userId}:`, error);
+      }
+    }, 10_000);
+
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', async (update: any) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr) {
+        entry.qrRaw = qr;
+        entry.qrCode = await QRCode.toDataURL(qr, { margin: 1, width: 320 });
+        entry.status = 'qr_ready';
+        entry.error = null;
       }
 
-      const client = new Client({
-        authStrategy: new LocalAuth({ clientId: `beatrice_${userId}` }),
-        puppeteer: { browser },
-      });
-
-      client.on('qr', (qr: string) => {
-        entry.status = 'qr_ready';
-        entry.qrCode = qr;
-      });
-
-      client.on('ready', () => {
+      if (connection === 'open') {
         entry.status = 'paired';
-        entry.phone = client.info?.wid?.user || client.info?.me?.user || 'unknown';
         entry.qrCode = null;
+        entry.qrRaw = null;
+        entry.error = null;
+        entry.phone = sock.user?.id ? jidNumber(sock.user.id) : 'connected';
         console.log(`WhatsApp paired for user ${userId}: ${entry.phone}`);
-      });
+      }
 
-      client.on('disconnected', (reason: string) => {
-        console.log(`WhatsApp disconnected for user ${userId}: ${reason}`);
-        entry.status = 'disconnected';
-        entry.qrCode = null;
-        entry.client = null;
-      });
+      if (connection === 'close') {
+        const statusCode = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
+        const loggedOut = statusCode === DisconnectReason.loggedOut;
+        entry.status = loggedOut ? 'disconnected' : 'error';
+        entry.error = loggedOut ? null : (lastDisconnect?.error?.message || 'WhatsApp connection closed');
+        entry.sock = null;
+        this.clearSaveTimer(entry);
 
-      client.on('auth_failure', (msg: string) => {
-        console.error(`WhatsApp auth failure for user ${userId}:`, msg);
-        entry.error = msg;
-        entry.status = 'disconnected';
-      });
-
-      client.on('message', async (msg: any) => {
-        if (entry.status === 'paired') {
-          entry.recentMessages.unshift({
-            from: msg.from || 'unknown',
-            body: msg.body?.slice(0, 200) || '[media]',
-            timestamp: Date.now(),
-          });
-          if (entry.recentMessages.length > 50) entry.recentMessages.pop();
-          console.log(`WhatsApp message for ${userId} from ${msg.from}: ${msg.body?.slice(0, 80)}`);
+        if (!loggedOut && !entry.reconnecting) {
+          entry.reconnecting = true;
+          setTimeout(async () => {
+            try {
+              await this.startSession(userId);
+            } catch (error: any) {
+              const current = this.sessions.get(userId);
+              if (current) {
+                current.status = 'error';
+                current.error = error.message || 'Reconnect failed';
+              }
+            }
+          }, 2_000);
         }
-      });
+      }
+    });
 
-      await client.initialize();
-      entry.client = client;
+    sock.ev.on('messages.upsert', ({ messages }: any) => {
+      for (const msg of messages || []) {
+        const chatId = msg.key?.remoteJid || '';
+        if (!chatId || chatId === 'status@broadcast') continue;
+        if (msg.key?.id) entry.messageById.set(`${chatId}:${msg.key.id}`, msg);
 
-      return { pairingCode };
-    } catch (e: any) {
-      console.error(`WhatsApp init error for ${userId}:`, e);
-      this.clients.delete(userId);
-      return { error: e.message || 'Failed to initialize WhatsApp' };
-    }
+        const body = messageText(msg) || '[media]';
+        const record: WaRecentMessage = {
+          id: msg.key?.id || `${chatId}:${Date.now()}`,
+          chatId,
+          from: msg.key?.participant || msg.key?.remoteJid || '',
+          body: body.slice(0, 1000),
+          timestamp: timestampMs(msg.messageTimestamp),
+          fromMe: !!msg.key?.fromMe,
+          isGroup: chatId.endsWith('@g.us'),
+          isMedia: !!msg.message?.imageMessage || !!msg.message?.videoMessage || !!msg.message?.documentMessage,
+        };
+        entry.recentMessages.unshift(record);
+      }
+      entry.recentMessages = entry.recentMessages.slice(0, 250);
+    });
+
+    const updateContacts = (contacts: any[]) => {
+      for (const contact of contacts || []) {
+        const id = contact.id || contact.jid;
+        if (!id || !String(id).endsWith('@s.whatsapp.net')) continue;
+        entry.contacts[id] = {
+          id,
+          name: contact.name || contact.notify || contact.verifiedName || entry.contacts[id]?.name || id,
+          number: jidNumber(id),
+        };
+      }
+    };
+
+    sock.ev.on('contacts.upsert', updateContacts);
+    sock.ev.on('contacts.update', updateContacts);
   }
 
   getStatus(userId: string): { status: string; qrCode?: string; phone?: string; error?: string } | null {
-    const entry = this.clients.get(userId);
+    const entry = this.sessions.get(userId);
     if (!entry) return null;
     return {
       status: entry.status,
@@ -122,53 +288,109 @@ export class WhatsAppManager {
     };
   }
 
-  getRecentMessages(userId: string, limit: number = 20): Array<{ from: string; body: string; timestamp: number }> {
-    const entry = this.clients.get(userId);
+  getRecentMessages(userId: string, limit = 20): WaRecentMessage[] {
+    const entry = this.sessions.get(userId);
     if (!entry) return [];
     return entry.recentMessages.slice(0, Math.min(limit, 50));
   }
 
+  getChats(userId: string, limit = 20): WaChatSummary[] {
+    const entry = this.sessions.get(userId);
+    if (!entry) return [];
+
+    const byId = new Map<string, WaChatSummary>();
+    for (const msg of entry.recentMessages) {
+      const current = byId.get(msg.chatId);
+      if (!current || msg.timestamp >= current.timestamp) {
+        byId.set(msg.chatId, {
+          id: msg.chatId,
+          name: current?.name || entry.contacts[msg.chatId]?.name || msg.chatId,
+          unreadCount: current?.unreadCount || 0,
+          lastMessage: msg.body.slice(0, 160),
+          timestamp: msg.timestamp,
+          isGroup: msg.isGroup,
+        });
+      }
+    }
+
+    return [...byId.values()]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, Math.min(limit, 50));
+  }
+
+  getContacts(userId: string, limit = 100): WaContactSummary[] {
+    const entry = this.sessions.get(userId);
+    if (!entry?.contacts) return [];
+
+    return Object.values(entry.contacts)
+      .filter(contact => contact.id.endsWith('@s.whatsapp.net'))
+      .slice(0, Math.min(limit, 500));
+  }
+
+  async getGroups(userId: string): Promise<WaChatSummary[]> {
+    const sock = this.getClient(userId);
+    if (!sock) return [];
+    const groups = await sock.groupFetchAllParticipating();
+    return Object.entries(groups).map(([id, meta]: [string, any]) => ({
+      id,
+      name: meta.subject || id,
+      unreadCount: 0,
+      lastMessage: '',
+      timestamp: timestampMs(meta.creation),
+      isGroup: true,
+    }));
+  }
+
+  getMessageHistory(userId: string, chatId: string, limit = 20): WaRecentMessage[] {
+    const entry = this.sessions.get(userId);
+    if (!entry) return [];
+    const jid = toWhatsAppJid(chatId, chatId.endsWith('@g.us'));
+    return entry.recentMessages
+      .filter(message => message.chatId === jid)
+      .slice(0, Math.min(limit, 50));
+  }
+
   async disconnect(userId: string): Promise<void> {
-    const entry = this.clients.get(userId);
+    const entry = this.sessions.get(userId);
     if (!entry) return;
     try {
-      if (entry.client) {
-        await entry.client.destroy();
+      if (entry.sock) {
+        await entry.sock.logout().catch(async () => entry.sock?.end?.(undefined));
       }
-    } catch (e) {
-      console.error(`WhatsApp destroy error for ${userId}:`, e);
+    } catch (error) {
+      console.error(`WhatsApp disconnect error for ${userId}:`, error);
     }
-    this.clients.delete(userId);
 
-    const authDir = path.join(process.cwd(), '.wwebjs_auth', `beatrice_${userId}`);
-    if (fs.existsSync(authDir)) {
-      try {
-        fs.rmSync(authDir, { recursive: true, force: true });
-        console.log(`Removed LocalAuth data for ${userId}`);
-      } catch (e) {
-        console.error(`Failed to remove LocalAuth data for ${userId}:`, e);
-      }
-    }
+    this.clearSaveTimer(entry);
+    this.sessions.delete(userId);
+    fs.rmSync(entry.authDir, { recursive: true, force: true });
   }
 
   getClient(userId: string): any {
-    const entry = this.clients.get(userId);
-    if (!entry || entry.status !== 'paired' || !entry.client) return null;
-    return entry.client;
+    const entry = this.sessions.get(userId);
+    if (!entry || entry.status !== 'paired' || !entry.sock) return null;
+    return entry.sock;
   }
 
   isPaired(userId: string): boolean {
-    const entry = this.clients.get(userId);
-    return entry?.status === 'paired';
+    return this.sessions.get(userId)?.status === 'paired';
   }
 
   async shutdown(): Promise<void> {
-    for (const [userId] of this.clients) {
-      await this.disconnect(userId);
+    for (const entry of this.sessions.values()) {
+      this.clearSaveTimer(entry);
+      try {
+        writeSessionData(entry);
+        entry.sock?.end?.(undefined);
+      } catch {}
     }
-    if (this.browser) {
-      try { await this.browser.close(); } catch { }
-      this.browser = null;
+    this.sessions.clear();
+  }
+
+  private clearSaveTimer(entry: WaSession) {
+    if (entry.saveTimer) {
+      clearInterval(entry.saveTimer);
+      entry.saveTimer = null;
     }
   }
 }
