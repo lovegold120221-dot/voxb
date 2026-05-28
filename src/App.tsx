@@ -182,7 +182,6 @@ interface ActionTask {
 
 const VOICE_ALIASES = [
   { name: "Queen Hera", id: "Aoede" },
-  { name: "King Hades", id: "Aoede" },
   { name: "King Leonidas", id: "Fenrir" },
   { name: "Queen Persephone", id: "Kore" },
   { name: "King Midas", id: "Puck" },

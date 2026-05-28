@@ -1,5 +1,6 @@
 -- Run this in the Supabase SQL Editor (https://supabase.com/dashboard/project/inypxifrayeafrlhkulz/sql)
 
+-- 1. Create tables (idempotent)
 CREATE TABLE IF NOT EXISTS messages (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id TEXT NOT NULL,
@@ -38,7 +39,13 @@ CREATE TABLE IF NOT EXISTS knowledge_files (
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_files_user_id ON knowledge_files(user_id);
 
--- Enable Realtime for tables (so changes flow to the frontend)
+-- 2. DISABLE ROW LEVEL SECURITY on all tables
+-- The app uses Firebase Auth, not Supabase Auth, so RLS blocks all writes.
+ALTER TABLE messages DISABLE ROW LEVEL SECURITY;
+ALTER TABLE user_settings DISABLE ROW LEVEL SECURITY;
+ALTER TABLE knowledge_files DISABLE ROW LEVEL SECURITY;
+
+-- 3. Enable Realtime for tables
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -56,13 +63,13 @@ BEGIN
   END IF;
 END $$;
 
--- Create storage buckets (avatars + knowledge-base)
+-- 4. Create storage buckets (if not exist)
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('avatars', 'avatars', true),
        ('knowledge-base', 'knowledge-base', true)
 ON CONFLICT (id) DO NOTHING;
 
--- Allow public read on both buckets (getPublicUrl requires this)
+-- 5. Storage policies
 DROP POLICY IF EXISTS "Public Read avatars" ON storage.objects;
 CREATE POLICY "Public Read avatars" ON storage.objects
   FOR SELECT USING (bucket_id = 'avatars');
@@ -71,7 +78,6 @@ DROP POLICY IF EXISTS "Public Read knowledge-base" ON storage.objects;
 CREATE POLICY "Public Read knowledge-base" ON storage.objects
   FOR SELECT USING (bucket_id = 'knowledge-base');
 
--- Allow authenticated users to upload to both buckets (auth handled by Firebase client-side)
 DROP POLICY IF EXISTS "Upload avatars" ON storage.objects;
 CREATE POLICY "Upload avatars" ON storage.objects
   FOR INSERT WITH CHECK (bucket_id = 'avatars');
@@ -80,12 +86,10 @@ DROP POLICY IF EXISTS "Upload knowledge-base" ON storage.objects;
 CREATE POLICY "Upload knowledge-base" ON storage.objects
   FOR INSERT WITH CHECK (bucket_id = 'knowledge-base');
 
--- Allow authenticated users to delete their own knowledge files
 DROP POLICY IF EXISTS "Delete own knowledge-base files" ON storage.objects;
 CREATE POLICY "Delete own knowledge-base files" ON storage.objects
   FOR DELETE USING (bucket_id = 'knowledge-base');
 
--- Allow authenticated users to update their own avatar
 DROP POLICY IF EXISTS "Update own avatar" ON storage.objects;
 CREATE POLICY "Update own avatar" ON storage.objects
   FOR UPDATE USING (bucket_id = 'avatars');
