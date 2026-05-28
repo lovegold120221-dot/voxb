@@ -100,12 +100,15 @@ CREATE POLICY "Upload avatars" ON storage.objects
   FOR INSERT WITH CHECK (bucket_id = 'avatars');
 
 DROP POLICY IF EXISTS "Upload knowledge-base" ON storage.objects;
+DROP POLICY IF EXISTS "Upload knowledge-base" ON storage.objects;
 CREATE POLICY "Upload knowledge-base" ON storage.objects
   FOR INSERT WITH CHECK (bucket_id = 'knowledge-base');
 
+DROP POLICY IF EXISTS "Upload chat-attachments" ON storage.objects;
 CREATE POLICY "Upload chat-attachments" ON storage.objects
   FOR INSERT WITH CHECK (bucket_id = 'chat-attachments');
 
+DROP POLICY IF EXISTS "Public Read chat-attachments" ON storage.objects;
 CREATE POLICY "Public Read chat-attachments" ON storage.objects
   FOR SELECT USING (bucket_id = 'chat-attachments');
 
