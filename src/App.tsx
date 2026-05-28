@@ -772,6 +772,7 @@ function MaximusAgent({
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const waveformCanvasRef = useRef<HTMLCanvasElement>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
   const videoIntervalRef = useRef<any>(null);
 
@@ -1158,6 +1159,67 @@ function MaximusAgent({
       });
     };
 
+    const drawWaveform = (canvas: HTMLCanvasElement | null, freqs: number[]) => {
+      if (!canvas) return;
+      const dpr = window.devicePixelRatio || 1;
+      const size = 144;
+      const w = size * dpr;
+      const h = size * dpr;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.clearRect(0, 0, w, h);
+
+      const cx = w / 2;
+      const cy = h / 2;
+      const radius = w * 0.32;
+      const numBars = 24;
+      const barWidth = 2.5 * dpr;
+      const barGap = 4 * dpr;
+
+      const interpolate = (arr: number[], idx: number) => {
+        const pos = (idx / numBars) * arr.length;
+        const i = Math.floor(pos);
+        const frac = pos - i;
+        const a = arr[Math.min(i, arr.length - 1)] || 0;
+        const b = arr[Math.min(i + 1, arr.length - 1)] || 0;
+        return a + (b - a) * frac;
+      };
+
+      for (let i = 0; i < numBars; i++) {
+        const angle = (i / numBars) * Math.PI * 2 - Math.PI / 2;
+        const val = interpolate(freqs, i);
+        const barHeight = 4 * dpr + val * radius * 0.7;
+
+        const innerR = radius - barHeight;
+        const outerR = radius;
+
+        const x1 = cx + Math.cos(angle) * innerR;
+        const y1 = cy + Math.sin(angle) * innerR;
+        const x2 = cx + Math.cos(angle) * outerR;
+        const y2 = cy + Math.sin(angle) * outerR;
+
+        const perpAngle = angle + Math.PI / 2;
+        const hw = (barWidth / 2);
+        const cosP = Math.cos(perpAngle) * hw;
+        const sinP = Math.sin(perpAngle) * hw;
+
+        ctx.beginPath();
+        ctx.moveTo(x1 + cosP, y1 + sinP);
+        ctx.lineTo(x2 + cosP, y2 + sinP);
+        ctx.lineTo(x2 - cosP, y2 - sinP);
+        ctx.lineTo(x1 - cosP, y1 - sinP);
+        ctx.closePath();
+
+        const alpha = 0.2 + val * 0.8;
+        ctx.fillStyle = `rgba(208, 167, 139, ${alpha})`;
+        ctx.fill();
+      }
+    };
+
     const updateVolumes = () => {
       if (isActive && audioStreamerRef.current && audioRecorderRef.current) {
         const streamerVols = audioStreamerRef.current.getFrequencies(11);
@@ -1175,10 +1237,13 @@ function MaximusAgent({
         const recAvg = recorderVols.reduce((a, b) => a + b, 0) / recorderVols.length;
         const recPeak = Math.max(...recorderVols);
         drawClouds(miniCloudCanvasRef.current, recAvg, recPeak, 80, cloudPuffs);
+        const combinedFreqs = streamerVols.map((v, i) => Math.max(v, recorderVols[i] || 0));
+        drawWaveform(waveformCanvasRef.current, combinedFreqs);
       } else {
         setVolumes(prev => prev.map(v => v + (0.05 - v) * 0.2));
         drawClouds(cloudCanvasRef.current, 0.05, 0.05, 208, cloudPuffs);
         drawClouds(miniCloudCanvasRef.current, 0.05, 0.05, 80, cloudPuffs);
+        drawWaveform(waveformCanvasRef.current, Array(11).fill(0.05));
       }
 
       animationFrame = requestAnimationFrame(updateVolumes);
@@ -2201,6 +2266,12 @@ ${historyContext}
             </div>
 
             <div className="absolute inset-0 z-20 rounded-full flex items-center justify-center overflow-hidden">
+              <canvas
+                ref={waveformCanvasRef}
+                className="absolute inset-0 w-full h-full pointer-events-none"
+                width={144}
+                height={144}
+              />
               <canvas
                 ref={cloudCanvasRef}
                 className="absolute inset-0 w-full h-full pointer-events-none"
