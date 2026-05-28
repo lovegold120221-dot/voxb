@@ -174,6 +174,8 @@ interface ChatMessage {
   text: string;
   sessionId?: string;
   timestamp: any;
+  attachmentUrl?: string;
+  attachmentName?: string;
 }
 
 interface ActionTask {
@@ -2216,18 +2218,20 @@ ${historyContext}
                     required: ["action"]
                   }
                 },
-                {
-                  name: "create_document",
-                  description: "Create a document (contract, report, letter, invoice, proposal, form, dashboard, or any written/visual material). The content must be a complete standalone single-file HTML page with all CSS and JS embedded. Never mention 'HTML' to the user — say 'document', 'preview', 'draft', or 'file' instead.",
-                  parameters: {
-                    type: Type.OBJECT,
-                    properties: {
-                      title: { type: Type.STRING, description: "Document title displayed to the user." },
-                      content: { type: Type.STRING, description: "Complete standalone single-file HTML page with embedded CSS and JS. Must include <!DOCTYPE html>, <html>, <head>, <body>. Fully self-contained — no external resources." }
-                    },
-                    required: ["title", "content"]
-                  }
-                }
+                 {
+                   name: "create_document",
+                   description: "Create a professional document (contract, report, letter, invoice, proposal, form, dashboard, or any written/visual material). The system will generate a high-quality standalone HTML page based on your request. Never mention 'HTML' to the user — say 'document', 'preview', 'draft', or 'file' instead.",
+                   parameters: {
+                     type: Type.OBJECT,
+                     properties: {
+                       title: { type: Type.STRING, description: "Document title displayed to the user." },
+                       prompt: { type: Type.STRING, description: "Detailed instructions for the document content, style, and structure." },
+                       content: { type: Type.STRING, description: "Optional: specific HTML content to use. If omitted, the system will generate it based on the prompt." }
+                     },
+                     required: ["title", "prompt"]
+                   }
+                 }
+
               ] as FunctionDeclaration[]
             }
           ],
@@ -2395,26 +2399,28 @@ ${historyContext}
                       } catch (e: any) {
                         result = { ok: false, error: e.message || 'WhatsApp action failed' };
                       }
-                      } else if (callName === 'create_document') {
-                        const args = call.args as any;
-                        try {
-                          const { streamDocumentFromVps } = await import('./lib/documentClient');
-                          const title = args.title || 'Document';
-                          
-                          const taskId = crypto.randomUUID();
-                          setComputerTask({
-                            id: taskId,
-                            type: 'webpage',
-                            label: title,
-                            status: 'working',
-                            steps: [{ key: 'generating', label: 'Generating document via Ollama...', done: false, active: true }],
-                            output: { type: 'webpage', title, content: '', fileType: 'html' },
-                            createdAt: Date.now(),
-                          });
-                          setComputerOutput({ content: '', title });
-                          setShowComputerPage(true);
+                     } else if (callName === 'create_document') {
+                       const args = call.args as any;
+                       try {
+                         const { streamDocumentFromVps } = await import('./lib/documentClient');
+                         const title = args.title || 'Document';
+                         const prompt = args.prompt || args.content || 'Create a professional document.';
+                         
+                         const taskId = crypto.randomUUID();
+                         setComputerTask({
+                           id: taskId,
+                           type: 'webpage',
+                           label: title,
+                           status: 'working',
+                           steps: [{ key: 'generating', label: 'Generating document via Ollama...', done: false, active: true }],
+                           output: { type: 'webpage', title, content: '', fileType: 'html' },
+                           createdAt: Date.now(),
+                         });
+                         setComputerOutput({ content: '', title });
+                         setShowComputerPage(true);
 
-                         const finalContent = await streamDocumentFromVps(user.uid, args, (chunk) => {
+
+                         const finalContent = await streamDocumentFromVps(user.uid, { title, content: prompt }, (chunk) => {
                            setComputerOutput(prev => prev ? { ...prev, content: (prev.content || '') + chunk } : { content: chunk, title });
                          });
 
@@ -2435,6 +2441,7 @@ ${historyContext}
                          });
                          result = { error: `Generation failed: ${e.message}` };
                        }
+
 
                       }
 
