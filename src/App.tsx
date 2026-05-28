@@ -717,10 +717,9 @@ function MaximusAgent({
     access_groups: false,
     send_group_messages: false,
     read_group_chats: false,
-    manage_media: false,
     view_message_history: false,
   });
-  const waPollRef = useRef<any>(null);
+  const waPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const aiRef = useRef<GoogleGenAI | null>(null);
   const sessionRef = useRef<any>(null);
@@ -1259,6 +1258,15 @@ function MaximusAgent({
       return g;
     }).sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
   }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      if (waPollRef.current) {
+        clearInterval(waPollRef.current);
+        waPollRef.current = null;
+      }
+    };
+  }, []);
 
   const selectedMessages = useMemo(() => {
     if (!selectedSessionId) return messages;
@@ -2347,12 +2355,19 @@ ${historyContext}
                                 if (s.phone) setWaPhone(s.phone);
                                 if (s.status === 'paired' || s.status === 'disconnected' || s.error) {
                                   if (waPollRef.current) clearInterval(waPollRef.current);
+                                  waPollRef.current = null;
                                   setWaPairing(false);
                                 }
-                              } catch {}
+                              } catch {
+                                if (waPollRef.current) clearInterval(waPollRef.current);
+                                waPollRef.current = null;
+                                setWaPairing(false);
+                              }
                             }, 1500);
                           } catch (e: any) {
                             setWaPairing(false);
+                            if (waPollRef.current) clearInterval(waPollRef.current);
+                            console.error('WhatsApp pairing error:', e);
                           }
                         }}
                         disabled={waPairing}
@@ -2374,7 +2389,6 @@ ${historyContext}
                         { key: 'access_groups', label: 'Access Groups' },
                         { key: 'send_group_messages', label: 'Send Group Messages' },
                         { key: 'read_group_chats', label: 'Read Group Chats' },
-                        { key: 'manage_media', label: 'Manage Media / Files' },
                         { key: 'view_message_history', label: 'View Message History' },
                       ].map(p => (
                         <label key={p.key} className="flex items-center justify-between py-1.5 cursor-pointer">

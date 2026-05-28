@@ -1,4 +1,6 @@
 import { randomBytes } from 'crypto';
+import fs from 'fs';
+import path from 'path';
 
 interface WaClient {
   userId: string;
@@ -8,6 +10,7 @@ interface WaClient {
   client: any | null;
   pairingCode: string;
   error: string | null;
+  recentMessages: Array<{ from: string; body: string; timestamp: number }>;
 }
 
 export class WhatsAppManager {
@@ -44,6 +47,7 @@ export class WhatsAppManager {
       client: null,
       pairingCode,
       error: null,
+      recentMessages: [],
     };
     this.clients.set(userId, entry);
 
@@ -86,6 +90,12 @@ export class WhatsAppManager {
 
       client.on('message', async (msg: any) => {
         if (entry.status === 'paired') {
+          entry.recentMessages.unshift({
+            from: msg.from || 'unknown',
+            body: msg.body?.slice(0, 200) || '[media]',
+            timestamp: Date.now(),
+          });
+          if (entry.recentMessages.length > 50) entry.recentMessages.pop();
           console.log(`WhatsApp message for ${userId} from ${msg.from}: ${msg.body?.slice(0, 80)}`);
         }
       });
@@ -112,6 +122,12 @@ export class WhatsAppManager {
     };
   }
 
+  getRecentMessages(userId: string, limit: number = 20): Array<{ from: string; body: string; timestamp: number }> {
+    const entry = this.clients.get(userId);
+    if (!entry) return [];
+    return entry.recentMessages.slice(0, Math.min(limit, 50));
+  }
+
   async disconnect(userId: string): Promise<void> {
     const entry = this.clients.get(userId);
     if (!entry) return;
@@ -123,6 +139,16 @@ export class WhatsAppManager {
       console.error(`WhatsApp destroy error for ${userId}:`, e);
     }
     this.clients.delete(userId);
+
+    const authDir = path.join(process.cwd(), '.wwebjs_auth', `beatrice_${userId}`);
+    if (fs.existsSync(authDir)) {
+      try {
+        fs.rmSync(authDir, { recursive: true, force: true });
+        console.log(`Removed LocalAuth data for ${userId}`);
+      } catch (e) {
+        console.error(`Failed to remove LocalAuth data for ${userId}:`, e);
+      }
+    }
   }
 
   getClient(userId: string): any {

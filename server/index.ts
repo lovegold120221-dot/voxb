@@ -210,6 +210,12 @@ app.get('/api/whatsapp/status/:userId', (req, res) => {
   res.json(status);
 });
 
+app.get('/api/whatsapp/messages/:userId', (req, res) => {
+  const limit = parseInt(req.query.limit as string) || 20;
+  const messages = waManager.getRecentMessages(req.params.userId, limit);
+  res.json({ messages });
+});
+
 app.post('/api/whatsapp/disconnect', async (req, res) => {
   try {
     const { userId } = req.body;

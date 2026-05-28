@@ -8,7 +8,6 @@ const ALL_PERMISSIONS = [
   'access_groups',
   'send_group_messages',
   'read_group_chats',
-  'manage_media',
   'view_message_history',
 ] as const;
 
