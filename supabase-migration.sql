@@ -1,6 +1,6 @@
 -- Run this in the Supabase SQL Editor (https://supabase.com/dashboard/project/inypxifrayeafrlhkulz/sql)
 
-CREATE TABLE messages (
+CREATE TABLE IF NOT EXISTS messages (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id TEXT NOT NULL,
   session_id TEXT NOT NULL DEFAULT 'default',
@@ -9,10 +9,10 @@ CREATE TABLE messages (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_messages_user_id ON messages(user_id);
-CREATE INDEX idx_messages_session ON messages(user_id, session_id);
+CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id);
+CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(user_id, session_id);
 
-CREATE TABLE user_settings (
+CREATE TABLE IF NOT EXISTS user_settings (
   user_id TEXT PRIMARY KEY,
   persona_name TEXT DEFAULT 'Beatrice',
   custom_prompt TEXT DEFAULT '',
@@ -26,7 +26,7 @@ CREATE TABLE user_settings (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE TABLE knowledge_files (
+CREATE TABLE IF NOT EXISTS knowledge_files (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id TEXT NOT NULL,
   file_name TEXT NOT NULL,
@@ -36,7 +36,7 @@ CREATE TABLE knowledge_files (
   uploaded_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_knowledge_files_user_id ON knowledge_files(user_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_files_user_id ON knowledge_files(user_id);
 
 -- Enable Realtime for both tables (so changes flow to the frontend)
 ALTER PUBLICATION supabase_realtime ADD TABLE messages;

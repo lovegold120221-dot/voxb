@@ -42,6 +42,7 @@ const TYPE_PREFIXES: Record<string, string> = {
   execute: 'Running',
   deploy: 'Deploying',
   zip: 'Packaging',
+  text: 'Processing',
 };
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
