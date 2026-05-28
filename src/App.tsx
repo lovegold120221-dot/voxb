@@ -2008,47 +2008,47 @@ ${historyContext}
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-start relative z-10 pt-4 sm:pt-6 px-4">
+      <main className="flex-1 flex flex-col items-center justify-center relative z-10 px-4 -mt-8 sm:-mt-12">
 
         <p className="text-zinc-300 text-xs sm:text-sm font-normal tracking-wide mt-2 px-4 text-center transition-all duration-300">
           {isActive ? 'Beatrice is listening...' : connecting ? 'Connecting...' : 'Beatrice is offline. Connect to begin.'}
         </p>
 
-        <div className="relative flex-1 flex items-center justify-center w-full max-h-[260px] sm:max-h-[300px] mt-4 sm:mt-6">
+        <div className="relative flex items-center justify-center w-full h-[200px] sm:h-[260px]">
           <div
-            className={`absolute w-56 h-56 sm:w-72 sm:h-72 ${isActive ? 'bg-[#d0a78b]/25' : 'bg-[#d0a78b]/10'} rounded-full blur-3xl transition-all duration-700 ${isActive ? 'orb-pulse-active' : ''}`}
+            className={`absolute w-48 h-48 sm:w-64 sm:h-64 ${isActive ? 'bg-[#d0a78b]/25' : 'bg-[#d0a78b]/10'} rounded-full blur-3xl transition-all duration-700 ${isActive ? 'orb-pulse-active' : ''}`}
           />
 
           <button
             onClick={isActive ? stopSession : startSession}
             disabled={connecting}
-            className="relative w-40 h-40 sm:w-52 sm:h-52 rounded-full bg-[#1c1614]/60 border border-[#d0a78b]/20 overflow-hidden flex items-center justify-center transition-all duration-500 hover:border-[#d0a78b] hover:shadow-[0_0_55px_rgba(208,167,139,0.3)] active:scale-[0.98]"
+            className="relative w-36 h-36 sm:w-48 sm:h-48 rounded-full bg-[#1c1614]/60 border border-[#d0a78b]/20 overflow-hidden flex items-center justify-center transition-all duration-500 hover:border-[#d0a78b] hover:shadow-[0_0_55px_rgba(208,167,139,0.3)] active:scale-[0.98]"
             aria-label="Toggle Voice Assistant"
           >
             <div className="absolute inset-0 bg-black/5 backdrop-blur-[12px] z-10 rounded-full pointer-events-none" />
 
             <div className="absolute inset-0 w-full h-full flex items-center justify-center transition-transform duration-100 ease-out z-0">
-              <div className="blob-1 absolute w-36 h-36 sm:w-48 sm:h-48 rounded-full bg-[radial-gradient(circle,rgba(208,167,139,0.65)_0%,transparent_70%)] blur-md" />
-              <div className="blob-2 absolute w-32 h-32 sm:w-44 sm:h-44 rounded-full bg-[radial-gradient(circle,rgba(171,123,96,0.45)_0%,transparent_70%)] blur-md" />
-              <div className="blob-3 absolute w-28 h-28 sm:w-40 sm:h-40 rounded-full bg-[radial-gradient(circle,rgba(235,208,188,0.55)_0%,transparent_70%)] blur-md" />
-              <div className="absolute w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-[#d0a78b]/15 blur-xl" />
+              <div className="blob-1 absolute w-32 h-32 sm:w-44 sm:h-44 rounded-full bg-[radial-gradient(circle,rgba(208,167,139,0.65)_0%,transparent_70%)] blur-md" />
+              <div className="blob-2 absolute w-28 h-28 sm:w-40 sm:h-40 rounded-full bg-[radial-gradient(circle,rgba(171,123,96,0.45)_0%,transparent_70%)] blur-md" />
+              <div className="blob-3 absolute w-24 h-24 sm:w-36 sm:h-36 rounded-full bg-[radial-gradient(circle,rgba(235,208,188,0.55)_0%,transparent_70%)] blur-md" />
+              <div className="absolute w-10 h-10 sm:w-14 sm:h-14 rounded-full bg-[#d0a78b]/15 blur-xl" />
             </div>
 
             <div className="absolute inset-0 z-20 rounded-full flex items-center justify-center overflow-hidden">
               <canvas
                 ref={cloudCanvasRef}
                 className="absolute inset-0 w-full h-full pointer-events-none"
-                width={160}
-                height={160}
+                width={144}
+                height={144}
               />
               {connecting ? (
-                <Loader2 className="w-8 h-8 sm:w-10 sm:h-10 animate-spin text-[#d0a78b] z-10" />
+                <Loader2 className="w-7 h-7 sm:w-9 sm:h-9 animate-spin text-[#d0a78b] z-10" />
               ) : isActive ? null : null}
             </div>
           </button>
         </div>
 
-        <div className="w-full max-w-xl px-2 sm:px-8 flex flex-col items-center justify-center text-center min-h-[60px] sm:min-h-[80px] gap-1 transition-opacity duration-700 pb-4">
+        <div className="w-full max-w-xl px-2 sm:px-8 flex flex-col items-center justify-center text-center min-h-[60px] sm:min-h-[80px] gap-1 transition-opacity duration-700">
           <AnimatePresence>
             {userTranscript && (
               <KaraokeTranscript
