@@ -913,6 +913,13 @@ function MaximusAgent({
     }, SILENCE_FILLER_DELAY_MS);
   };
 
+  const markUserSpeechActivity = () => {
+    lastUserSpeechAtRef.current = Date.now();
+    silenceFillerCountRef.current = 0;
+    silenceFillerInFlightRef.current = false;
+    clearSilenceFillerTimer();
+  };
+
   const sendAudioToLive = (base64Data: string) => {
     const session = sessionRef.current;
 
