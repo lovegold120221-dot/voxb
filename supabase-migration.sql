@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
   user_id TEXT PRIMARY KEY,
   persona_name TEXT DEFAULT 'Beatrice',
   custom_prompt TEXT DEFAULT '',
-  selected_voice TEXT DEFAULT 'Charon',
+  selected_voice TEXT DEFAULT 'Aoede',
   context_size INT DEFAULT 20,
   avatar_url TEXT,
   knowledge_domains TEXT[] DEFAULT '{}',
@@ -38,6 +38,54 @@ CREATE TABLE IF NOT EXISTS knowledge_files (
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_files_user_id ON knowledge_files(user_id);
 
--- Enable Realtime for both tables (so changes flow to the frontend)
-ALTER PUBLICATION supabase_realtime ADD TABLE messages;
-ALTER PUBLICATION supabase_realtime ADD TABLE user_settings;
+-- Enable Realtime for tables (so changes flow to the frontend)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'messages'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE messages;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'user_settings'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE user_settings;
+  END IF;
+END $$;
+
+-- Create storage buckets (avatars + knowledge-base)
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('avatars', 'avatars', true),
+       ('knowledge-base', 'knowledge-base', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Allow public read on both buckets (getPublicUrl requires this)
+DROP POLICY IF EXISTS "Public Read avatars" ON storage.objects;
+CREATE POLICY "Public Read avatars" ON storage.objects
+  FOR SELECT USING (bucket_id = 'avatars');
+
+DROP POLICY IF EXISTS "Public Read knowledge-base" ON storage.objects;
+CREATE POLICY "Public Read knowledge-base" ON storage.objects
+  FOR SELECT USING (bucket_id = 'knowledge-base');
+
+-- Allow authenticated users to upload to both buckets (auth handled by Firebase client-side)
+DROP POLICY IF EXISTS "Upload avatars" ON storage.objects;
+CREATE POLICY "Upload avatars" ON storage.objects
+  FOR INSERT WITH CHECK (bucket_id = 'avatars');
+
+DROP POLICY IF EXISTS "Upload knowledge-base" ON storage.objects;
+CREATE POLICY "Upload knowledge-base" ON storage.objects
+  FOR INSERT WITH CHECK (bucket_id = 'knowledge-base');
+
+-- Allow authenticated users to delete their own knowledge files
+DROP POLICY IF EXISTS "Delete own knowledge-base files" ON storage.objects;
+CREATE POLICY "Delete own knowledge-base files" ON storage.objects
+  FOR DELETE USING (bucket_id = 'knowledge-base');
+
+-- Allow authenticated users to update their own avatar
+DROP POLICY IF EXISTS "Update own avatar" ON storage.objects;
+CREATE POLICY "Update own avatar" ON storage.objects
+  FOR UPDATE USING (bucket_id = 'avatars');

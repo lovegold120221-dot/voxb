@@ -182,7 +182,7 @@ interface ActionTask {
 
 const VOICE_ALIASES = [
   { name: "Queen Hera", id: "Aoede" },
-  { name: "King Hades", id: "Charon" },
+  { name: "King Hades", id: "Aoede" },
   { name: "King Leonidas", id: "Fenrir" },
   { name: "Queen Persephone", id: "Kore" },
   { name: "King Midas", id: "Puck" },
@@ -394,7 +394,7 @@ export default function App() {
               .insert({
                 user_id: u.uid,
                 persona_name: 'Beatrice',
-                selected_voice: 'Charon',
+                selected_voice: 'Aoede',
                 custom_prompt: '',
                 context_size: 20,
               });
@@ -479,6 +479,21 @@ export default function App() {
     signOut(auth);
   };
 
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetEmail.trim()) { setAuthError('Enter your email address'); return; }
+    setAuthError('');
+    try {
+      await sendPasswordResetEmail(auth, resetEmail.trim());
+      setResetSent(true);
+    } catch (err: any) {
+      const msg = err.code === 'auth/user-not-found' ? 'No account with this email.'
+        : err.code === 'auth/invalid-email' ? 'Invalid email address.'
+        : err.message || 'Failed to send reset email';
+      setAuthError(msg);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center">
@@ -547,12 +562,63 @@ export default function App() {
               {authMode === 'signin' ? 'Sign In' : 'Create Account'}
             </button>
           </form>
-          <button
-            onClick={() => { setAuthMode(authMode === 'signin' ? 'signup' : 'signin'); setAuthError(''); }}
-            className="text-[10px] text-zinc-600 hover:text-zinc-400 tracking-wider uppercase transition-colors mb-5"
-          >
-            {authMode === 'signin' ? 'Create an account instead' : 'Sign in instead'}
-          </button>
+          <div className="flex items-center justify-between w-full mb-5">
+            <button
+              onClick={() => { setAuthMode(authMode === 'signin' ? 'signup' : 'signin'); setAuthError(''); }}
+              className="text-[10px] text-zinc-600 hover:text-zinc-400 tracking-wider uppercase transition-colors"
+            >
+              {authMode === 'signin' ? 'Create an account' : 'Sign in'}
+            </button>
+            <button
+              onClick={() => { setShowResetPassword(true); setAuthError(''); setResetSent(false); setResetEmail(authEmail); }}
+              className="text-[10px] text-zinc-600 hover:text-amber-400 tracking-wider uppercase transition-colors"
+            >
+              Forgot password?
+            </button>
+          </div>
+          {showResetPassword && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              className="w-full mb-4 overflow-hidden"
+            >
+              <div className="bg-zinc-900/60 border border-zinc-800 rounded-xl p-4 space-y-3">
+                <p className="text-[11px] text-zinc-400">Enter your email and we'll send a reset link.</p>
+                {resetSent ? (
+                  <div className="flex items-center gap-2 text-emerald-400 text-xs">
+                    <Check className="w-4 h-4 shrink-0" />
+                    <span>Reset link sent. Check your inbox.</span>
+                  </div>
+                ) : (
+                  <form onSubmit={handleResetPassword} className="space-y-2">
+                    <input
+                      type="email"
+                      placeholder="Email address"
+                      value={resetEmail}
+                      onChange={e => setResetEmail(e.target.value)}
+                      className="w-full bg-[#0A0A0B] text-zinc-200 placeholder-zinc-600 text-sm px-4 py-2.5 rounded-lg border border-zinc-800 outline-none focus:border-amber-500/40 transition-colors"
+                    />
+                    {authError && <p className="text-red-400 text-xs">{authError}</p>}
+                    <div className="flex gap-2">
+                      <button
+                        type="submit"
+                        className="flex-1 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs font-medium hover:bg-amber-500/20 transition-all"
+                      >
+                        Send Reset Link
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowResetPassword(false); setAuthError(''); }}
+                        className="px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs hover:text-zinc-200 transition-all"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            </motion.div>
+          )}
           <div className="flex items-center gap-3 w-full mb-5">
             <div className="flex-1 h-px bg-zinc-800" />
             <span className="text-[10px] text-zinc-700 uppercase tracking-widest">or</span>
@@ -570,6 +636,7 @@ export default function App() {
               value={authLanguage}
               onChange={e => { setAuthLanguage(e.target.value); try { localStorage.setItem('beatrice_language', e.target.value); } catch {} }}
               className="w-full bg-[#0A0A0B] border border-zinc-800 text-zinc-400 text-xs rounded-xl px-3 py-2.5 outline-none focus:border-amber-500/40 transition-colors appearance-none cursor-pointer"
+              title="Language"
             >
               {LANGUAGES.map(l => (
                 <option key={l.code} value={l.code}>{l.label}</option>
@@ -633,7 +700,7 @@ function MaximusAgent({
   const [computerDownloadUrl, setComputerDownloadUrl] = useState<string | null>(null);
   const [personaName, setPersonaName] = useState("Beatrice");
   const [customPrompt, setCustomPrompt] = useState("");
-  const [selectedVoice, setSelectedVoice] = useState("Charon");
+  const [selectedVoice, setSelectedVoice] = useState("Aoede");
   const [contextSize, setContextSize] = useState(20);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
