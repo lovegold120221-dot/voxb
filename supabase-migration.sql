@@ -55,6 +55,11 @@ ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS whatsapp_permissions JSONB DE
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS whatsapp_paired BOOLEAN DEFAULT false;
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS whatsapp_phone TEXT;
 
+-- Add attachment columns to messages table (idempotent)
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_url TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_name TEXT;
+
+
 -- 3. Enable Realtime for tables
 DO $$
 BEGIN
@@ -76,8 +81,10 @@ END $$;
 -- 4. Create storage buckets (if not exist)
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('avatars', 'avatars', true),
-       ('knowledge-base', 'knowledge-base', true)
+       ('knowledge-base', 'knowledge-base', true),
+       ('chat-attachments', 'chat-attachments', true)
 ON CONFLICT (id) DO NOTHING;
+
 
 -- 5. Storage policies
 DROP POLICY IF EXISTS "Public Read avatars" ON storage.objects;
@@ -95,6 +102,12 @@ CREATE POLICY "Upload avatars" ON storage.objects
 DROP POLICY IF EXISTS "Upload knowledge-base" ON storage.objects;
 CREATE POLICY "Upload knowledge-base" ON storage.objects
   FOR INSERT WITH CHECK (bucket_id = 'knowledge-base');
+
+CREATE POLICY "Upload chat-attachments" ON storage.objects
+  FOR INSERT WITH CHECK (bucket_id = 'chat-attachments');
+
+CREATE POLICY "Public Read chat-attachments" ON storage.objects
+  FOR SELECT USING (bucket_id = 'chat-attachments');
 
 DROP POLICY IF EXISTS "Delete own knowledge-base files" ON storage.objects;
 CREATE POLICY "Delete own knowledge-base files" ON storage.objects

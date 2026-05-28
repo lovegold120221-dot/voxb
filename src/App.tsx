@@ -1110,6 +1110,69 @@ function MaximusAgent({
     setChatInput("");
   };
 
+  const handleFileAttach = async (file: File) => {
+    if (!sessionRef.current || !isActive) return;
+
+    try {
+      // 1. Upload to Supabase Storage
+      const path = `${user.uid}/${Date.now()}_${file.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from('chat-attachments')
+        .upload(path, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('chat-attachments')
+        .getPublicUrl(path);
+
+      // 2. Real-time visibility for Beatrice
+      if (file.type.startsWith('image/')) {
+        // Convert image to base64 JPEG and send as video frame
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
+              if (!ctx) return resolve('');
+              
+              // Resize for Gemini Live API (max 640x480)
+              let width = img.width;
+              let height = img.height;
+              if (width > 640 || height > 480) {
+                const ratio = Math.min(640 / width, 480 / height);
+                width *= ratio;
+                height *= ratio;
+              }
+              canvas.width = width;
+              canvas.height = height;
+              ctx.drawImage(img, 0, 0, width, height);
+              resolve(canvas.toDataURL('image/jpeg', 0.6).split(',')[1]);
+            };
+            img.src = e.target?.result as string;
+          };
+          reader.readAsDataURL(file);
+        });
+        if (base64) sendVideoToLive(base64);
+      } else if (file.type === 'text/plain') {
+        const text = await file.text();
+        sendTextToLive(`[Attached file: ${file.name}]\n${text}`);
+      } else {
+        sendTextToLive(`[User attached a file: ${file.name} (${file.type}, ${Math.round(file.size / 1024)}KB)]`);
+      }
+
+      // 3. Save to Supabase messages
+      const messageText = `Attached file: ${file.name}`;
+      setMessages(prev => [...prev, { role: 'user', text: messageText, timestamp: new Date().toISOString(), sessionId: sessionIdRef.current }]);
+      await saveMessage('user', messageText, publicUrl, file.name);
+
+    } catch (err) {
+      console.error('File attach error:', err);
+    }
+  };
+
   useEffect(() => {
     let animationFrame: number;
     const cloudPuffs = Array.from({ length: 14 }, (_, i) => ({
@@ -2154,7 +2217,7 @@ ${historyContext}
     setModelTranscript('');
   };
 
-  const saveMessage = async (role: 'user' | 'model', text: string) => {
+  const saveMessage = async (role: 'user' | 'model', text: string, attachmentUrl?: string, attachmentName?: string) => {
     try {
       await supabase
         .from('messages')
@@ -2163,6 +2226,8 @@ ${historyContext}
           session_id: sessionIdRef.current,
           role,
           text,
+          attachment_url: attachmentUrl,
+          attachment_name: attachmentName,
         });
     } catch (error) {
       handleDbError(error, 'messages', 'insert');
@@ -2347,6 +2412,7 @@ ${historyContext}
             isActive={isActive}
             personaName={personaName}
             userName={user.displayName?.split(' ')[0] || 'Commander'}
+            onFileAttach={handleFileAttach}
           />
         )}
       </AnimatePresence>

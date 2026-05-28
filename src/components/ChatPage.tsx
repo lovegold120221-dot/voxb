@@ -30,6 +30,7 @@ interface ChatPageProps {
   isActive: boolean;
   personaName: string;
   userName: string;
+  onFileAttach?: (file: File) => void;
 }
 
 const formatTime = (ts: any): string => {
@@ -66,6 +67,7 @@ export function ChatPage({
   isActive,
   personaName,
   userName,
+  onFileAttach,
 }: ChatPageProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -108,6 +110,16 @@ export function ChatPage({
 
   const handleFileAttach = () => {
     fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && onFileAttach) {
+      onFileAttach(file);
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   return (
@@ -364,6 +376,7 @@ export function ChatPage({
                 accept="image/*,.pdf,.doc,.docx,.txt"
                 aria-label="Attach file"
                 title="Attach file"
+                onChange={handleFileChange}
               />
               <input
                 ref={inputRef}
