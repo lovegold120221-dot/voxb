@@ -64,7 +64,7 @@ export class SandboxManager {
     });
   }
 
-  createTask(type: string, label: string): string {
+  createTask(type: string, label: string, userEmail?: string, userId?: string): string {
     const id = `task-${Date.now()}-${randomBytes(4).toString('hex')}`;
     const taskDir = this.taskPath(id);
 
@@ -84,6 +84,8 @@ export class SandboxManager {
       output: null,
       error: null,
       createdAt: Date.now(),
+      userEmail,
+      userId,
     };
 
     this.tasks.set(id, task);

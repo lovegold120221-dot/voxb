@@ -3,6 +3,8 @@ export interface TaskRequest {
   label: string;
   prompt?: string;
   userRequest?: string;
+  userEmail?: string;
+  userId?: string;
 }
 
 export interface TaskStep {
@@ -35,6 +37,8 @@ export interface SandboxTask {
   output: TaskOutput | null;
   error: string | null;
   createdAt: number;
+  userEmail?: string;
+  userId?: string;
 }
 
 export interface TaskStatusResponse {
@@ -48,4 +52,6 @@ export interface TaskStatusResponse {
   files: TaskFile[];
   error: string | null;
   output: TaskOutput | null;
+  userEmail?: string;
+  userId?: string;
 }

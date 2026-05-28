@@ -1,6 +1,6 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
-import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp, collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { GoogleGenAI, LiveServerMessage, Modality, Type } from '@google/genai';
 import { AudioRecorder, AudioStreamer } from './lib/audio';
@@ -14,9 +14,160 @@ import { detectExecutionIntent } from './lib/executionDetector';
 import { createSandboxTask, pollTaskStatus, stopPolling, retryTask } from './lib/sandboxClient';
 import type { ComputerTask } from './lib/executionDetector';
 
+const LANGUAGES = [
+  { code: 'en', label: 'English' },
+  { code: 'nl-BE', label: 'Dutch (Belgium) / Vlaams' },
+  { code: 'af', label: 'Afrikaans' },
+  { code: 'sq', label: 'Albanian' },
+  { code: 'am', label: 'Amharic' },
+  { code: 'ar', label: 'Arabic' },
+  { code: 'hy', label: 'Armenian' },
+  { code: 'as', label: 'Assamese' },
+  { code: 'ay', label: 'Aymara' },
+  { code: 'az', label: 'Azerbaijani' },
+  { code: 'bm', label: 'Bambara' },
+  { code: 'eu', label: 'Basque' },
+  { code: 'be', label: 'Belarusian' },
+  { code: 'bn', label: 'Bengali' },
+  { code: 'bho', label: 'Bhojpuri' },
+  { code: 'bs', label: 'Bosnian' },
+  { code: 'br', label: 'Breton' },
+  { code: 'bg', label: 'Bulgarian' },
+  { code: 'my', label: 'Burmese' },
+  { code: 'ca', label: 'Catalan' },
+  { code: 'ceb', label: 'Cebuano' },
+  { code: 'zh', label: 'Chinese (Simplified)' },
+  { code: 'zh-TW', label: 'Chinese (Traditional)' },
+  { code: 'co', label: 'Corsican' },
+  { code: 'hr', label: 'Croatian' },
+  { code: 'cs', label: 'Czech' },
+  { code: 'da', label: 'Danish' },
+  { code: 'dv', label: 'Divehi' },
+  { code: 'nl', label: 'Dutch' },
+  { code: 'dz', label: 'Dzongkha' },
+  { code: 'eo', label: 'Esperanto' },
+  { code: 'et', label: 'Estonian' },
+  { code: 'ee', label: 'Ewe' },
+  { code: 'fo', label: 'Faroese' },
+  { code: 'fj', label: 'Fijian' },
+  { code: 'fil', label: 'Filipino' },
+  { code: 'fi', label: 'Finnish' },
+  { code: 'fr', label: 'French' },
+  { code: 'fy', label: 'Frisian' },
+  { code: 'ff', label: 'Fulah' },
+  { code: 'gl', label: 'Galician' },
+  { code: 'ka', label: 'Georgian' },
+  { code: 'de', label: 'German' },
+  { code: 'el', label: 'Greek' },
+  { code: 'gn', label: 'Guarani' },
+  { code: 'gu', label: 'Gujarati' },
+  { code: 'ht', label: 'Haitian Creole' },
+  { code: 'ha', label: 'Hausa' },
+  { code: 'haw', label: 'Hawaiian' },
+  { code: 'he', label: 'Hebrew' },
+  { code: 'hi', label: 'Hindi' },
+  { code: 'hmn', label: 'Hmong' },
+  { code: 'hu', label: 'Hungarian' },
+  { code: 'is', label: 'Icelandic' },
+  { code: 'ig', label: 'Igbo' },
+  { code: 'ilo', label: 'Ilocano' },
+  { code: 'id', label: 'Indonesian' },
+  { code: 'ga', label: 'Irish' },
+  { code: 'it', label: 'Italian' },
+  { code: 'ja', label: 'Japanese' },
+  { code: 'jv', label: 'Javanese' },
+  { code: 'kn', label: 'Kannada' },
+  { code: 'kk', label: 'Kazakh' },
+  { code: 'km', label: 'Khmer' },
+  { code: 'rw', label: 'Kinyarwanda' },
+  { code: 'ky', label: 'Kyrgyz' },
+  { code: 'ko', label: 'Korean' },
+  { code: 'ku', label: 'Kurdish' },
+  { code: 'ckb', label: 'Kurdish (Sorani)' },
+  { code: 'lo', label: 'Lao' },
+  { code: 'la', label: 'Latin' },
+  { code: 'lv', label: 'Latvian' },
+  { code: 'ln', label: 'Lingala' },
+  { code: 'lt', label: 'Lithuanian' },
+  { code: 'lg', label: 'Luganda' },
+  { code: 'lb', label: 'Luxembourgish' },
+  { code: 'mk', label: 'Macedonian' },
+  { code: 'mg', label: 'Malagasy' },
+  { code: 'ms', label: 'Malay' },
+  { code: 'ml', label: 'Malayalam' },
+  { code: 'mt', label: 'Maltese' },
+  { code: 'mi', label: 'Maori' },
+  { code: 'mr', label: 'Marathi' },
+  { code: 'mni', label: 'Meiteilon (Manipuri)' },
+  { code: 'mn', label: 'Mongolian' },
+  { code: 'ne', label: 'Nepali' },
+  { code: 'nso', label: 'Northern Sotho' },
+  { code: 'no', label: 'Norwegian' },
+  { code: 'nb', label: 'Norwegian Bokmål' },
+  { code: 'nn', label: 'Norwegian Nynorsk' },
+  { code: 'oc', label: 'Occitan' },
+  { code: 'or', label: 'Odia (Oriya)' },
+  { code: 'om', label: 'Oromo' },
+  { code: 'ps', label: 'Pashto' },
+  { code: 'fa', label: 'Persian' },
+  { code: 'pl', label: 'Polish' },
+  { code: 'pt', label: 'Portuguese' },
+  { code: 'pt-BR', label: 'Portuguese (Brazil)' },
+  { code: 'pa', label: 'Punjabi' },
+  { code: 'qu', label: 'Quechua' },
+  { code: 'ro', label: 'Romanian' },
+  { code: 'rm', label: 'Romansh' },
+  { code: 'rn', label: 'Rundi' },
+  { code: 'ru', label: 'Russian' },
+  { code: 'sm', label: 'Samoan' },
+  { code: 'sg', label: 'Sango' },
+  { code: 'sa', label: 'Sanskrit' },
+  { code: 'gd', label: 'Scottish Gaelic' },
+  { code: 'sr', label: 'Serbian' },
+  { code: 'st', label: 'Sesotho' },
+  { code: 'sn', label: 'Shona' },
+  { code: 'sd', label: 'Sindhi' },
+  { code: 'si', label: 'Sinhala' },
+  { code: 'sk', label: 'Slovak' },
+  { code: 'sl', label: 'Slovenian' },
+  { code: 'so', label: 'Somali' },
+  { code: 'es', label: 'Spanish' },
+  { code: 'su', label: 'Sundanese' },
+  { code: 'sw', label: 'Swahili' },
+  { code: 'ss', label: 'Swati' },
+  { code: 'sv', label: 'Swedish' },
+  { code: 'tl', label: 'Tagalog' },
+  { code: 'ty', label: 'Tahitian' },
+  { code: 'tg', label: 'Tajik' },
+  { code: 'ta', label: 'Tamil' },
+  { code: 'tt', label: 'Tatar' },
+  { code: 'te', label: 'Telugu' },
+  { code: 'th', label: 'Thai' },
+  { code: 'bo', label: 'Tibetan' },
+  { code: 'ti', label: 'Tigrinya' },
+  { code: 'ts', label: 'Tsonga' },
+  { code: 'tn', label: 'Tswana' },
+  { code: 'tr', label: 'Turkish' },
+  { code: 'tk', label: 'Turkmen' },
+  { code: 'tw', label: 'Twi' },
+  { code: 'uk', label: 'Ukrainian' },
+  { code: 'ur', label: 'Urdu' },
+  { code: 'ug', label: 'Uyghur' },
+  { code: 'uz', label: 'Uzbek' },
+  { code: 've', label: 'Venda' },
+  { code: 'vi', label: 'Vietnamese' },
+  { code: 'cy', label: 'Welsh' },
+  { code: 'wo', label: 'Wolof' },
+  { code: 'xh', label: 'Xhosa' },
+  { code: 'yi', label: 'Yiddish' },
+  { code: 'yo', label: 'Yoruba' },
+  { code: 'zu', label: 'Zulu' },
+];
+
 interface ChatMessage {
   role: 'user' | 'model';
   text: string;
+  sessionId?: string;
   timestamp: any;
 }
 
@@ -60,7 +211,6 @@ BOSS/ASSISTANT DYNAMIC:
 - Use phrases like "Let me scan that for you...", "I'm just pulling up your calendar...", "Wait, let me just finish this draft for you...", or "I'm looking at the screen now...".
 - Integrate the work into your conversational flow.
 - If a tool result is pending or takes time, keep talking briefly and normally.
-- You can occasionally use tiny working sounds like "click-click...", "mm-hmm...", or a quiet "hmm..." as you scroll through data.
 - If you are typing a long message or search, you can sound slightly distracted for a second, then snap back.
 - Make it clear you are doing the work as you speak, but do not overperform it.
 
@@ -177,6 +327,13 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [googleToken, setGoogleToken] = useState<string | null>(null);
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authLanguage, setAuthLanguage] = useState(() => {
+    try { return localStorage.getItem('beatrice_language') || 'en'; } catch { return 'en'; }
+  });
+  const [authError, setAuthError] = useState('');
 
   const clearStoredToken = useCallback(() => {
     try {
@@ -245,10 +402,23 @@ export default function App() {
       const provider = new GoogleAuthProvider();
 
       provider.addScope('https://www.googleapis.com/auth/gmail.modify');
+      provider.addScope('https://www.googleapis.com/auth/gmail.compose');
+      provider.addScope('https://www.googleapis.com/auth/gmail.send');
+      provider.addScope('https://www.googleapis.com/auth/gmail.labels');
       provider.addScope('https://www.googleapis.com/auth/drive');
+      provider.addScope('https://www.googleapis.com/auth/drive.file');
+      provider.addScope('https://www.googleapis.com/auth/drive.metadata.readonly');
+      provider.addScope('https://www.googleapis.com/auth/drive.appdata');
       provider.addScope('https://www.googleapis.com/auth/calendar');
+      provider.addScope('https://www.googleapis.com/auth/calendar.events');
+      provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
       provider.addScope('https://www.googleapis.com/auth/tasks');
       provider.addScope('https://www.googleapis.com/auth/youtube');
+      provider.addScope('https://www.googleapis.com/auth/youtube.force-ssl');
+      provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+      provider.addScope('https://www.googleapis.com/auth/documents');
+      provider.addScope('https://www.googleapis.com/auth/contacts.readonly');
+      provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
 
       provider.setCustomParameters({
         prompt: 'consent',
@@ -264,6 +434,29 @@ export default function App() {
       }
     } catch (error) {
       console.error("Login failed:", error);
+    }
+  };
+
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    if (!authEmail || !authPassword) { setAuthError('Email and password required'); return; }
+    if (authPassword.length < 6) { setAuthError('Password must be at least 6 characters'); return; }
+    try {
+      if (authMode === 'signup') {
+        await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+      } else {
+        await signInWithEmailAndPassword(auth, authEmail, authPassword);
+      }
+      try { localStorage.setItem('beatrice_language', authLanguage); } catch {}
+    } catch (err: any) {
+      const msg = err.code === 'auth/email-already-in-use' ? 'Email already registered. Sign in instead.'
+        : err.code === 'auth/user-not-found' ? 'No account with this email. Sign up instead.'
+        : err.code === 'auth/wrong-password' ? 'Wrong password. Try again.'
+        : err.code === 'auth/invalid-credential' ? 'Invalid email or password.'
+        : err.code === 'auth/too-many-requests' ? 'Too many attempts. Try later.'
+        : err.message || 'Authentication failed';
+      setAuthError(msg);
     }
   };
 
@@ -293,46 +486,84 @@ export default function App() {
           <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-amber-500/5 rounded-full blur-[120px]" />
           <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-amber-700/5 rounded-full blur-[100px]" />
         </div>
-
-        <div
-          className="absolute inset-0 opacity-[0.03] pointer-events-none dot-pattern"
-        />
-
+        <div className="absolute inset-0 opacity-[0.03] pointer-events-none dot-pattern" />
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="relative z-10 flex flex-col items-center max-w-sm w-full"
         >
-          <div className="group relative mb-12">
-            <div className="absolute -inset-4 bg-amber-500/20 rounded-full blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-            <div className="w-28 h-28 rounded-full bg-gradient-to-br from-amber-500/20 to-amber-900/40 p-[1px] relative">
+          <div className="group relative mb-10">
+            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-amber-500/20 to-amber-900/40 p-[1px] relative">
               <div className="w-full h-full rounded-full bg-[#0A0A0B] flex items-center justify-center border border-amber-500/10">
-                <Activity className="w-12 h-12 text-amber-500" />
+                <Activity className="w-10 h-10 text-amber-500" />
               </div>
             </div>
           </div>
-
-          <h1 className="text-5xl font-light tracking-tighter mb-4 text-white font-sans uppercase">
+          <h1 className="text-4xl font-light tracking-tighter mb-1 text-white font-sans uppercase">
             Beatrice
           </h1>
-
-          <p className="text-amber-500/40 text-center mb-12 leading-relaxed font-mono text-[10px] uppercase tracking-[0.2em]">
+          <p className="text-amber-500/40 text-center mb-8 leading-relaxed font-mono text-[10px] uppercase tracking-[0.2em]">
             Precision Vocal Synthesis // Integrated Intelligence
           </p>
-
+          <form onSubmit={handleEmailAuth} className="w-full space-y-3 mb-4">
+            <div className="flex rounded-xl overflow-hidden border border-zinc-800 focus-within:border-amber-500/40 transition-colors">
+              <input
+                type="email"
+                placeholder="Email"
+                value={authEmail}
+                onChange={e => setAuthEmail(e.target.value)}
+                className="flex-1 bg-[#0A0A0B] text-zinc-200 placeholder-zinc-600 text-sm px-4 py-3 outline-none"
+              />
+            </div>
+            <div className="flex rounded-xl overflow-hidden border border-zinc-800 focus-within:border-amber-500/40 transition-colors">
+              <input
+                type="password"
+                placeholder="Password"
+                value={authPassword}
+                onChange={e => setAuthPassword(e.target.value)}
+                className="flex-1 bg-[#0A0A0B] text-zinc-200 placeholder-zinc-600 text-sm px-4 py-3 outline-none"
+              />
+            </div>
+            {authError && (
+              <p className="text-red-400 text-xs text-center">{authError}</p>
+            )}
+            <button
+              type="submit"
+              className="w-full py-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 text-sm font-medium hover:bg-amber-500/20 transition-all"
+            >
+              {authMode === 'signin' ? 'Sign In' : 'Create Account'}
+            </button>
+          </form>
+          <button
+            onClick={() => { setAuthMode(authMode === 'signin' ? 'signup' : 'signin'); setAuthError(''); }}
+            className="text-[10px] text-zinc-600 hover:text-zinc-400 tracking-wider uppercase transition-colors mb-5"
+          >
+            {authMode === 'signin' ? 'Create an account instead' : 'Sign in instead'}
+          </button>
+          <div className="flex items-center gap-3 w-full mb-5">
+            <div className="flex-1 h-px bg-zinc-800" />
+            <span className="text-[10px] text-zinc-700 uppercase tracking-widest">or</span>
+            <div className="flex-1 h-px bg-zinc-800" />
+          </div>
           <button
             onClick={handleLogin}
-            className="group relative w-full overflow-hidden rounded-full p-[1px] transition-all hover:scale-[1.02] active:scale-[0.98]"
+            className="w-full flex items-center justify-center gap-3 py-3 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-300 text-sm font-medium hover:border-zinc-700 hover:text-white transition-all"
           >
-            <div className="absolute inset-0 bg-gradient-to-r from-amber-500 to-amber-600 transition-all group-hover:from-amber-400 group-hover:to-amber-500" />
-            <div className="relative flex items-center justify-center bg-[#050505] rounded-full py-4 transition-all group-hover:bg-transparent">
-              <span className="text-amber-500 group-hover:text-black font-semibold text-sm tracking-widest uppercase transition-colors">
-                Initiate Command
-              </span>
-            </div>
+            <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+            Continue with Google
           </button>
-
-          <div className="mt-12 flex items-center gap-2 text-[10px] font-mono text-zinc-600 uppercase tracking-widest">
+          <div className="mt-6 w-full">
+            <select
+              value={authLanguage}
+              onChange={e => { setAuthLanguage(e.target.value); try { localStorage.setItem('beatrice_language', e.target.value); } catch {} }}
+              className="w-full bg-[#0A0A0B] border border-zinc-800 text-zinc-400 text-xs rounded-xl px-3 py-2.5 outline-none focus:border-amber-500/40 transition-colors appearance-none cursor-pointer"
+            >
+              {LANGUAGES.map(l => (
+                <option key={l.code} value={l.code}>{l.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="mt-6 flex items-center gap-2 text-[10px] font-mono text-zinc-600 uppercase tracking-widest">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-500/20 animate-pulse" />
             System Secure
           </div>
@@ -388,13 +619,16 @@ function MaximusAgent({
   const [selectedVoice, setSelectedVoice] = useState("Charon");
   const [contextSize, setContextSize] = useState(20);
   const [isSaving, setIsSaving] = useState(false);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
   const aiRef = useRef<GoogleGenAI | null>(null);
   const sessionRef = useRef<any>(null);
   const sessionStartingRef = useRef(false);
+  const sessionIdRef = useRef<string>(crypto.randomUUID());
 
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
   const audioRecorderRef = useRef<AudioRecorder | null>(null);
+  const cloudCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -528,7 +762,12 @@ function MaximusAgent({
     if (!intent) return;
 
     try {
-      const { taskId, task } = await createSandboxTask(intent.type, intent.label, text);
+      sendTextToLive(
+        `The Boss wants me to create a ${intent.type}: "${intent.label}". Acknowledge it briefly and say you're working on it now — keep it natural, like a capable assistant.`
+      );
+      await new Promise(r => setTimeout(r, 1200));
+
+      const { taskId, task } = await createSandboxTask(intent.type, intent.label, text, user?.email || undefined, user?.uid || undefined);
       activeTaskIdRef.current = taskId;
       setComputerTask(task);
       setComputerOutput(null);
@@ -550,8 +789,9 @@ function MaximusAgent({
           if (downloadUrl) setComputerDownloadUrl(downloadUrl);
 
           const outputName = output?.title || finalTask.label;
+          const userRef = user?.email ? ` for ${user.email}` : '';
           sendTextToLive(
-            `The user asked: "${text}". The task is ${finalTask.status === 'done' ? 'finished' : 'stopped'}: ${outputName}. ${finalTask.status === 'done' ? 'The output is ready. Tell the Boss naturally that it is ready to view.' : 'There was a problem. Tell the Boss honestly that it ran into an issue but the partial result is saved.'} Keep it casual.`
+            `The user (${user?.uid || 'unknown'}) asked: "${text}". The task is ${finalTask.status === 'done' ? 'finished' : 'stopped'}: ${outputName}${userRef}. ${finalTask.status === 'done' ? 'The output is ready. Tell the Boss naturally that it is ready to view.' : 'There was a problem. Tell the Boss honestly that it ran into an issue but the partial result is saved.'} Keep it casual.`
           );
         },
         (error) => {
@@ -621,6 +861,54 @@ function MaximusAgent({
 
   useEffect(() => {
     let animationFrame: number;
+    const cloudPuffs = Array.from({ length: 10 }, (_, i) => ({
+      cx: 0.2 + Math.random() * 0.6,
+      cy: 0.2 + Math.random() * 0.6,
+      r: 0.12 + Math.random() * 0.2,
+      phaseX: Math.random() * Math.PI * 2,
+      phaseY: Math.random() * Math.PI * 2,
+      speedX: 0.15 + Math.random() * 0.25,
+      speedY: 0.12 + Math.random() * 0.2,
+    }));
+
+    const drawClouds = (avg: number, peak: number) => {
+      const canvas = cloudCanvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      const dpr = window.devicePixelRatio || 1;
+      const w = 208 * dpr;
+      const h = 208 * dpr;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+      ctx.clearRect(0, 0, w, h);
+
+      const time = Date.now() / 1000;
+      const boost = 1 + avg * 0.6 + peak * 0.4;
+
+      cloudPuffs.forEach((puff, i) => {
+        const driftX = Math.sin(time * puff.speedX + puff.phaseX) * 0.12;
+        const driftY = Math.cos(time * puff.speedY + puff.phaseY) * 0.1;
+        const x = (puff.cx + driftX) * w;
+        const y = (puff.cy + driftY) * h;
+        const baseR = puff.r * w * 0.45;
+        const r = baseR * boost;
+
+        const alpha = 0.12 + avg * 0.25 + peak * 0.15;
+        const gradient = ctx.createRadialGradient(x, y, 0, x, y, r);
+        gradient.addColorStop(0, `rgba(208, 167, 139, ${Math.min(1, alpha * 1.5)})`);
+        gradient.addColorStop(0.4, `rgba(208, 167, 139, ${Math.min(1, alpha * 0.8)})`);
+        gradient.addColorStop(0.7, `rgba(208, 167, 139, ${Math.min(1, alpha * 0.3)})`);
+        gradient.addColorStop(1, 'rgba(208, 167, 139, 0)');
+
+        ctx.beginPath();
+        ctx.fillStyle = gradient;
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    };
 
     const updateVolumes = () => {
       if (isActive && audioStreamerRef.current && audioRecorderRef.current) {
@@ -632,8 +920,13 @@ function MaximusAgent({
           target = Math.min(1, target * 1.5);
           return v + (target - v) * 0.4;
         }));
+
+        const avg = streamerVols.reduce((a, b) => a + b, 0) / streamerVols.length;
+        const peak = Math.max(...streamerVols);
+        drawClouds(avg, peak);
       } else {
         setVolumes(prev => prev.map(v => v + (0.05 - v) * 0.2));
+        drawClouds(0.05, 0.05);
       }
 
       animationFrame = requestAnimationFrame(updateVolumes);
@@ -667,8 +960,7 @@ function MaximusAgent({
   useEffect(() => {
     const historyQuery = query(
       collection(db, 'users', user.uid, 'messages'),
-      orderBy('timestamp', 'desc'),
-      limit(contextSize)
+      orderBy('timestamp', 'desc')
     );
 
     const unsubHistory = onSnapshot(
@@ -687,9 +979,15 @@ function MaximusAgent({
         setMessages(messageList);
 
         if (msgs.length > 0) {
-          setHistoryContext("Previous conversation for context memory:\n" + msgs.join("\n"));
+          const contextMsgs = msgs.slice(-contextSize);
+          setHistoryContext("Previous conversation for context memory:\n" + contextMsgs.join("\n"));
         } else {
           setHistoryContext("");
+        }
+
+        if (messageList.length > 0 && !selectedSessionId) {
+          const newest = [...messageList].reverse().find(m => m.sessionId);
+          if (newest?.sessionId) setSelectedSessionId(newest.sessionId);
         }
       },
       (error) => {
@@ -730,6 +1028,36 @@ function MaximusAgent({
     };
   }, [user.uid, contextSize]);
 
+  const sessions = useMemo(() => {
+    const groups = new Map<string, { id: string; messages: ChatMessage[]; startTime: Date; endTime: Date; preview: string; count: number }>();
+    messages.forEach(m => {
+      const sid = m.sessionId || 'default';
+      if (!groups.has(sid)) {
+        groups.set(sid, { id: sid, messages: [], startTime: new Date(), endTime: new Date(), preview: '', count: 0 });
+      }
+      groups.get(sid)!.messages.push(m);
+    });
+    return Array.from(groups.values()).map(g => {
+      g.messages.sort((a, b) => {
+        const ta = a.timestamp?.toDate ? a.timestamp.toDate() : new Date(a.timestamp);
+        const tb = b.timestamp?.toDate ? b.timestamp.toDate() : new Date(b.timestamp);
+        return ta.getTime() - tb.getTime();
+      });
+      const first = g.messages[0];
+      const last = g.messages[g.messages.length - 1];
+      g.startTime = first?.timestamp?.toDate ? first.timestamp.toDate() : new Date(first?.timestamp || 0);
+      g.endTime = last?.timestamp?.toDate ? last.timestamp.toDate() : new Date(last?.timestamp || 0);
+      g.count = g.messages.length;
+      g.preview = first?.text?.slice(0, 80) || '';
+      return g;
+    }).sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
+  }, [messages]);
+
+  const selectedMessages = useMemo(() => {
+    if (!selectedSessionId) return messages;
+    return messages.filter(m => m.sessionId === selectedSessionId);
+  }, [messages, selectedSessionId]);
+
   const saveSettings = async () => {
     setIsSaving(true);
 
@@ -760,6 +1088,8 @@ function MaximusAgent({
 
   const startSession = async () => {
     if (sessionStartingRef.current || isActive || connecting) return;
+
+    sessionIdRef.current = crypto.randomUUID();
 
     const apiKey = getGeminiApiKey();
 
@@ -1337,6 +1667,7 @@ ${historyContext}
       await setDoc(doc(messagesRef), {
         role,
         text,
+        sessionId: sessionIdRef.current,
         timestamp: serverTimestamp()
       });
     } catch (error) {
@@ -1407,20 +1738,16 @@ ${historyContext}
               <div className="absolute w-16 h-16 rounded-full bg-[#d0a78b]/15 blur-xl" />
             </div>
 
-            <div className="absolute inset-0 z-20 rounded-full flex items-center justify-center">
+            <div className="absolute inset-0 z-20 rounded-full flex items-center justify-center overflow-hidden">
+              <canvas
+                ref={cloudCanvasRef}
+                className="absolute inset-0 w-full h-full pointer-events-none"
+                width={208}
+                height={208}
+              />
               {connecting ? (
-                <Loader2 className="w-10 h-10 animate-spin text-[#d0a78b]" />
-              ) : isActive ? (
-                <div className="flex gap-1.5 items-center h-20">
-                  {volumes.map((v, i) => (
-                    <motion.div
-                      key={i}
-                      style={{ height: Math.max(6, v * 120) + 'px' }}
-                      className="w-1.5 bg-[#d0a78b]/80 rounded-full transition-all duration-75"
-                    />
-                  ))}
-                </div>
-              ) : null}
+                <Loader2 className="w-10 h-10 animate-spin text-[#d0a78b] z-10" />
+              ) : isActive ? null : null}
             </div>
           </button>
         </div>
@@ -1486,7 +1813,10 @@ ${historyContext}
       <AnimatePresence>
         {showChatPage && (
           <ChatPage
-            messages={messages}
+            messages={selectedMessages}
+            sessions={sessions}
+            selectedSessionId={selectedSessionId}
+            onSelectSession={setSelectedSessionId}
             chatInput={chatInput}
             setChatInput={setChatInput}
             onSend={handleSendChat}

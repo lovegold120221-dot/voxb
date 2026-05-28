@@ -48,14 +48,14 @@ app.get('/api/ollama/status', async (_req, res) => {
 
 app.post('/api/tasks', async (req, res) => {
   try {
-    const { type, label, prompt, userRequest } = req.body as TaskRequest;
+    const { type, label, prompt, userRequest, userEmail, userId } = req.body as TaskRequest;
 
     if (!type || !label) {
       res.status(400).json({ error: 'Missing task type or label' });
       return;
     }
 
-    const taskId = sandbox.createTask(type, label);
+    const taskId = sandbox.createTask(type, label, userEmail, userId);
     const task = sandbox.getTask(taskId);
     if (!task) {
       res.status(500).json({ error: 'Failed to create task sandbox' });
@@ -70,7 +70,7 @@ app.post('/api/tasks', async (req, res) => {
       downloadUrl: `/sandbox/tasks/${taskId}/output/`,
     });
 
-    runTask(taskId, type, prompt || userRequest || label);
+    runTask(taskId, type, prompt || userRequest || label, userEmail, userId);
   } catch (err) {
     console.error('Task creation error:', err);
     res.status(500).json({ error: 'Internal error creating task' });
@@ -97,6 +97,8 @@ app.get('/api/tasks/:taskId', (req, res) => {
     files: task.files || [],
     error: task.error || null,
     output: task.output || null,
+    userEmail: task.userEmail,
+    userId: task.userId,
   };
 
   res.json(response);
@@ -127,8 +129,10 @@ app.get('/api/tasks/:taskId/files/:fileName', (req, res) => {
   res.download(filePath, safeName);
 });
 
-async function runTask(taskId: string, type: string, prompt: string) {
+async function runTask(taskId: string, type: string, prompt: string, userEmail?: string, userId?: string) {
   try {
+    const userContext = userEmail ? `${userEmail} (${userId || 'unknown'})` : 'unknown user';
+    console.log(`Running task ${taskId} [${type}] for user ${userContext}: "${prompt.slice(0, 80)}"`);
     sandbox.updateStep(taskId, 'understanding', 'done');
     sandbox.updateStep(taskId, 'preparing', 'active');
     sandbox.setTaskStatus(taskId, 'preparing');

@@ -38,11 +38,11 @@ function mapBackendSteps(steps: { key: string; label: string; status: string }[]
   }));
 }
 
-export async function createSandboxTask(type: string, label: string, prompt: string): Promise<{ taskId: string; task: ComputerTask }> {
+export async function createSandboxTask(type: string, label: string, prompt: string, userEmail?: string, userId?: string): Promise<{ taskId: string; task: ComputerTask }> {
   const res = await fetch(`${SANDBOX_URL}/api/tasks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type, label, userRequest: prompt }),
+    body: JSON.stringify({ type, label, userRequest: prompt, userEmail, userId }),
   });
 
   if (!res.ok) {
