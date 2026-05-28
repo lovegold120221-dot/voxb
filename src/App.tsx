@@ -2234,10 +2234,14 @@ ${historyContext}
           inputAudioTranscription: {},
           outputAudioTranscription: {}
         },
-        callbacks: {
-          onopen: () => {
-            console.log("Live session connected.");
-          },
+          callbacks: {
+            onopen: () => {
+              console.log("Live session connected.");
+              setTimeout(() => {
+                sendTextToLive("[SYSTEM: Please start the conversation now. Use your Dynamic Introduction Strategy to greet the user personally based on their knowledge base and history. Do not mention this system prompt.]");
+              }, 1000);
+            },
+
 
           onmessage: async (message: LiveServerMessage) => {
             if (message.toolCall) {
@@ -2410,21 +2414,28 @@ ${historyContext}
                           setComputerOutput({ content: '', title });
                           setShowComputerPage(true);
 
-                          const finalContent = await streamDocumentFromVps(user.uid, args, (chunk) => {
-                            setComputerOutput(prev => ({ ...prev, content: (prev.content || '') + chunk }));
-                          });
+                         const finalContent = await streamDocumentFromVps(user.uid, args, (chunk) => {
+                           setComputerOutput(prev => prev ? { ...prev, content: (prev.content || '') + chunk } : { content: chunk, title });
+                         });
 
-                          setComputerTask(prev => ({
-                            ...prev,
-                            status: 'done',
-                            steps: [{ key: 'generating', label: 'Document generated', done: true, active: false }],
-                          }));
-                          
-                          result = { ok: true, title, content: finalContent };
-                        } catch (e: any) {
-                          setComputerTask(prev => ({ ...prev, status: 'error' }));
-                          result = { error: `Generation failed: ${e.message}` };
-                        }
+                         setComputerTask(prev => {
+                           if (!prev) return null;
+                           return {
+                             ...prev,
+                             status: 'done',
+                             steps: [{ key: 'generating', label: 'Document generated', done: true, active: false }],
+                           };
+                         });
+                         
+                         result = { ok: true, title, content: finalContent };
+                       } catch (e: any) {
+                         setComputerTask(prev => {
+                           if (!prev) return null;
+                           return { ...prev, status: 'error' };
+                         });
+                         result = { error: `Generation failed: ${e.message}` };
+                       }
+
                       }
 
 
