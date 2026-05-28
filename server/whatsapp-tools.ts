@@ -48,11 +48,16 @@ export async function handleSendMessage(
   const textError = requireText(text, 'Message text');
   if (textError) return { ok: false, error: textError };
 
-  const sock = wa.getClient(userId);
-  if (!sock) return { ok: false, error: 'WhatsApp not paired' };
-
   try {
+    const sock = wa.getClient(userId);
     const chatId = toWhatsAppJid(to);
+    if (!sock) {
+      const cloudSent = await wa.sendCloudTextMessage(userId, to, text);
+      if (cloudSent) {
+        return { ok: true, sent: true, chatId: cloudSent.chatId, messageId: cloudSent.messageId };
+      }
+      return { ok: false, error: 'WhatsApp not paired and no WhatsApp Cloud API credentials are configured' };
+    }
     const sent = await sock.sendMessage(chatId, { text });
     return { ok: true, sent: true, chatId, messageId: sent?.key?.id };
   } catch (error: any) {

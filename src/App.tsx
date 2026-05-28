@@ -12,6 +12,7 @@ import { ChatPage } from './components/ChatPage';
 import { VideoPage } from './components/VideoPage';
 import { ComputerPage } from './components/ComputerPage';
 import { ProfilePage } from './components/ProfilePage';
+import { AdminPortal } from './components/AdminPortal';
 import { detectExecutionIntent } from './lib/executionDetector';
 import { createSandboxTask, pollTaskStatus, stopPolling, retryTask } from './lib/sandboxClient';
 import { startWhatsAppPairing, getWhatsAppStatus, disconnectWhatsApp } from './lib/whatsappClient';
@@ -667,6 +668,19 @@ export default function App() {
     );
   }
 
+  const isAdminPortal = typeof window !== 'undefined'
+    && window.location.pathname.replace(/\/+$/, '') === '/adminportal';
+
+  if (isAdminPortal) {
+    return (
+      <AdminPortal
+        user={user}
+        onBack={() => { window.location.href = '/'; }}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
   return (
     <MaximusAgent
       user={user}
@@ -1176,17 +1190,49 @@ function MaximusAgent({
 
   useEffect(() => {
     let animationFrame: number;
-    const cloudPuffs = Array.from({ length: 14 }, (_, i) => ({
-      cx: 0.15 + Math.random() * 0.7,
-      cy: 0.15 + Math.random() * 0.7,
-      r: 0.08 + Math.random() * 0.18,
-      phaseX: Math.random() * Math.PI * 2,
-      phaseY: Math.random() * Math.PI * 2,
-      speedX: 0.25 + Math.random() * 0.4,
-      speedY: 0.2 + Math.random() * 0.35,
-    }));
+    type CloudPuff = {
+      cx: number;
+      cy: number;
+      r: number;
+      phaseX: number;
+      phaseY: number;
+      speedX: number;
+      speedY: number;
+      alpha: number;
+      tint: 'cream' | 'peach' | 'amber';
+    };
 
-    const drawClouds = (canvas: HTMLCanvasElement | null, avg: number, peak: number, size: number, puffs: typeof cloudPuffs) => {
+    const cloudPuffs: CloudPuff[] = [
+      { cx: 0.30, cy: 0.46, r: 0.22, phaseX: 0.2, phaseY: 1.4, speedX: 0.18, speedY: 0.15, alpha: 0.64, tint: 'peach' },
+      { cx: 0.45, cy: 0.39, r: 0.26, phaseX: 2.1, phaseY: 0.7, speedX: 0.16, speedY: 0.18, alpha: 0.72, tint: 'cream' },
+      { cx: 0.61, cy: 0.44, r: 0.24, phaseX: 3.0, phaseY: 2.5, speedX: 0.19, speedY: 0.14, alpha: 0.66, tint: 'peach' },
+      { cx: 0.39, cy: 0.58, r: 0.25, phaseX: 4.4, phaseY: 1.1, speedX: 0.14, speedY: 0.20, alpha: 0.62, tint: 'amber' },
+      { cx: 0.55, cy: 0.59, r: 0.28, phaseX: 1.7, phaseY: 4.1, speedX: 0.17, speedY: 0.16, alpha: 0.70, tint: 'cream' },
+      { cx: 0.70, cy: 0.55, r: 0.19, phaseX: 5.1, phaseY: 3.6, speedX: 0.23, speedY: 0.17, alpha: 0.48, tint: 'peach' },
+      { cx: 0.23, cy: 0.61, r: 0.17, phaseX: 3.7, phaseY: 5.2, speedX: 0.22, speedY: 0.19, alpha: 0.46, tint: 'amber' },
+      { cx: 0.50, cy: 0.50, r: 0.33, phaseX: 0.9, phaseY: 2.8, speedX: 0.10, speedY: 0.12, alpha: 0.42, tint: 'peach' },
+      { cx: 0.34, cy: 0.31, r: 0.14, phaseX: 5.8, phaseY: 0.4, speedX: 0.25, speedY: 0.16, alpha: 0.36, tint: 'cream' },
+      { cx: 0.66, cy: 0.31, r: 0.15, phaseX: 2.8, phaseY: 4.8, speedX: 0.21, speedY: 0.18, alpha: 0.38, tint: 'cream' },
+      { cx: 0.32, cy: 0.73, r: 0.12, phaseX: 1.2, phaseY: 3.2, speedX: 0.20, speedY: 0.24, alpha: 0.32, tint: 'amber' },
+      { cx: 0.65, cy: 0.72, r: 0.13, phaseX: 4.7, phaseY: 2.2, speedX: 0.24, speedY: 0.22, alpha: 0.34, tint: 'peach' },
+    ];
+
+    const stopCloudPuffs: CloudPuff[] = [
+      { cx: 0.28, cy: 0.49, r: 0.22, phaseX: 0.3, phaseY: 1.8, speedX: 0.20, speedY: 0.16, alpha: 0.62, tint: 'peach' },
+      { cx: 0.45, cy: 0.42, r: 0.25, phaseX: 2.0, phaseY: 0.9, speedX: 0.17, speedY: 0.18, alpha: 0.72, tint: 'cream' },
+      { cx: 0.62, cy: 0.50, r: 0.23, phaseX: 3.5, phaseY: 2.8, speedX: 0.18, speedY: 0.14, alpha: 0.64, tint: 'peach' },
+      { cx: 0.39, cy: 0.61, r: 0.20, phaseX: 4.7, phaseY: 1.4, speedX: 0.15, speedY: 0.21, alpha: 0.54, tint: 'amber' },
+      { cx: 0.58, cy: 0.62, r: 0.21, phaseX: 1.5, phaseY: 4.0, speedX: 0.19, speedY: 0.16, alpha: 0.56, tint: 'cream' },
+      { cx: 0.50, cy: 0.52, r: 0.31, phaseX: 0.8, phaseY: 3.1, speedX: 0.11, speedY: 0.12, alpha: 0.36, tint: 'peach' },
+    ];
+
+    const getCloudColor = (tint: CloudPuff['tint']) => {
+      if (tint === 'cream') return { core: '255, 241, 232', mid: '235, 208, 188', edge: '208, 167, 139' };
+      if (tint === 'amber') return { core: '236, 189, 154', mid: '208, 167, 139', edge: '151, 104, 78' };
+      return { core: '248, 220, 202', mid: '208, 167, 139', edge: '171, 123, 96' };
+    };
+
+    const drawClouds = (canvas: HTMLCanvasElement | null, avg: number, peak: number, size: number, puffs: CloudPuff[]) => {
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
@@ -1200,28 +1246,46 @@ function MaximusAgent({
       ctx.clearRect(0, 0, w, h);
 
       const time = Date.now() / 1000;
-      const boost = 1 + avg * 1.5 + peak * 1.2;
+      const energy = Math.min(1, avg * 1.35 + peak * 0.95);
+      const breath = 0.96 + Math.sin(time * 1.4) * 0.025 + energy * 0.22;
 
+      const mist = ctx.createRadialGradient(w * 0.5, h * 0.52, 0, w * 0.5, h * 0.52, w * (0.44 + energy * 0.16));
+      mist.addColorStop(0, `rgba(255, 239, 229, ${0.10 + energy * 0.18})`);
+      mist.addColorStop(0.45, `rgba(208, 167, 139, ${0.08 + energy * 0.12})`);
+      mist.addColorStop(1, 'rgba(208, 167, 139, 0)');
+      ctx.fillStyle = mist;
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
       puffs.forEach((puff) => {
-        const driftX = Math.sin(time * puff.speedX + puff.phaseX) * 0.15;
-        const driftY = Math.cos(time * puff.speedY + puff.phaseY) * 0.12;
+        const driftX = Math.sin(time * puff.speedX + puff.phaseX) * (0.035 + energy * 0.055);
+        const driftY = Math.cos(time * puff.speedY + puff.phaseY) * (0.025 + energy * 0.04);
         const x = (puff.cx + driftX) * w;
         const y = (puff.cy + driftY) * h;
-        const baseR = puff.r * w * 0.45;
-        const r = baseR * boost;
+        const r = puff.r * w * breath;
 
-        const alpha = 0.08 + avg * 0.5 + peak * 0.3;
+        const alpha = Math.min(0.92, (0.12 + energy * 0.56 + peak * 0.16) * puff.alpha);
+        const color = getCloudColor(puff.tint);
         const gradient = ctx.createRadialGradient(x, y, 0, x, y, r);
-        gradient.addColorStop(0, `rgba(208, 167, 139, ${Math.min(1, alpha * 2)})`);
-        gradient.addColorStop(0.3, `rgba(208, 167, 139, ${Math.min(1, alpha * 1.2)})`);
-        gradient.addColorStop(0.6, `rgba(208, 167, 139, ${Math.min(1, alpha * 0.5)})`);
-        gradient.addColorStop(1, 'rgba(208, 167, 139, 0)');
+        gradient.addColorStop(0, `rgba(${color.core}, ${alpha})`);
+        gradient.addColorStop(0.34, `rgba(${color.mid}, ${alpha * 0.58})`);
+        gradient.addColorStop(0.68, `rgba(${color.edge}, ${alpha * 0.22})`);
+        gradient.addColorStop(1, `rgba(${color.edge}, 0)`);
 
         ctx.beginPath();
         ctx.fillStyle = gradient;
         ctx.arc(x, y, r, 0, Math.PI * 2);
         ctx.fill();
       });
+      ctx.restore();
+
+      const halo = ctx.createRadialGradient(w * 0.48, h * 0.42, w * 0.06, w * 0.5, h * 0.5, w * 0.48);
+      halo.addColorStop(0, `rgba(255, 247, 240, ${0.10 + energy * 0.12})`);
+      halo.addColorStop(0.52, `rgba(208, 167, 139, ${0.06 + energy * 0.11})`);
+      halo.addColorStop(1, 'rgba(208, 167, 139, 0)');
+      ctx.fillStyle = halo;
+      ctx.fillRect(0, 0, w, h);
     };
 
     const drawStopClouds = (canvas: HTMLCanvasElement | null, vols: number[]) => {
@@ -1241,38 +1305,38 @@ function MaximusAgent({
       const time = Date.now() / 1000;
       const avg = vols.reduce((a, b) => a + b, 0) / vols.length;
       const peak = Math.max(...vols);
-      const boost = 1 + avg * 1.2 + peak * 0.8;
+      const energy = Math.min(1, avg * 1.55 + peak * 1.1);
 
-      // Use a fixed set of puffs for the stop button
-      const puffs = Array.from({ length: 8 }, (_, i) => ({
-        cx: 0.2 + (i / 8) * 0.6,
-        cy: 0.2 + Math.sin(i) * 0.3 + 0.4,
-        r: 0.1 + Math.random() * 0.1,
-        phaseX: i * Math.PI / 4,
-        phaseY: i * Math.PI / 2,
-        speedX: 0.3 + (i % 3) * 0.1,
-        speedY: 0.2 + (i % 2) * 0.1,
-      }));
+      const base = ctx.createRadialGradient(w * 0.5, h * 0.5, 0, w * 0.5, h * 0.5, w * (0.46 + energy * 0.16));
+      base.addColorStop(0, `rgba(255, 240, 230, ${0.14 + energy * 0.26})`);
+      base.addColorStop(0.55, `rgba(208, 167, 139, ${0.10 + energy * 0.18})`);
+      base.addColorStop(1, 'rgba(208, 167, 139, 0)');
+      ctx.fillStyle = base;
+      ctx.fillRect(0, 0, w, h);
 
-      puffs.forEach((puff) => {
-        const driftX = Math.sin(time * puff.speedX + puff.phaseX) * 0.1;
-        const driftY = Math.cos(time * puff.speedY + puff.phaseY) * 0.1;
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      stopCloudPuffs.forEach((puff) => {
+        const driftX = Math.sin(time * puff.speedX + puff.phaseX) * (0.03 + energy * 0.045);
+        const driftY = Math.cos(time * puff.speedY + puff.phaseY) * (0.025 + energy * 0.035);
         const x = (puff.cx + driftX) * w;
         const y = (puff.cy + driftY) * h;
-        const baseR = puff.r * w * 0.4;
-        const r = baseR * boost;
+        const r = puff.r * w * (0.92 + energy * 0.34);
 
-        const alpha = 0.08 + avg * 0.4 + peak * 0.2;
+        const alpha = Math.min(0.86, (0.14 + energy * 0.52 + peak * 0.14) * puff.alpha);
+        const color = getCloudColor(puff.tint);
         const gradient = ctx.createRadialGradient(x, y, 0, x, y, r);
-        gradient.addColorStop(0, `rgba(208, 167, 139, ${Math.min(1, alpha * 2)})`);
-        gradient.addColorStop(0.4, `rgba(208, 167, 139, ${Math.min(1, alpha * 1.1)})`);
-        gradient.addColorStop(1, 'rgba(208, 167, 139, 0)');
+        gradient.addColorStop(0, `rgba(${color.core}, ${alpha})`);
+        gradient.addColorStop(0.38, `rgba(${color.mid}, ${alpha * 0.58})`);
+        gradient.addColorStop(0.78, `rgba(${color.edge}, ${alpha * 0.20})`);
+        gradient.addColorStop(1, `rgba(${color.edge}, 0)`);
 
         ctx.beginPath();
         ctx.fillStyle = gradient;
         ctx.arc(x, y, r, 0, Math.PI * 2);
         ctx.fill();
       });
+      ctx.restore();
     };
 
     const updateVolumes = () => {
@@ -1440,6 +1504,9 @@ function MaximusAgent({
         if (settingsData.context_size !== undefined) setContextSize(settingsData.context_size);
         if (settingsData.user_title) { setUserTitle(settingsData.user_title); try { localStorage.setItem('beatrice_userTitle', settingsData.user_title); } catch {} }
         if (settingsData.language) { onSetLanguage(settingsData.language); try { localStorage.setItem('beatrice_language', settingsData.language); } catch {} }
+        if (settingsData.whatsapp_permissions) setWaPermissions(prev => ({ ...prev, ...settingsData.whatsapp_permissions }));
+        if (settingsData.whatsapp_paired) setWaStatus('paired');
+        if (settingsData.whatsapp_phone) setWaPhone(settingsData.whatsapp_phone);
       }
 
       const settingsChannel = supabase
@@ -1453,6 +1520,9 @@ function MaximusAgent({
           if (s.context_size !== undefined) setContextSize(s.context_size);
           if (s.user_title) { setUserTitle(s.user_title); try { localStorage.setItem('beatrice_userTitle', s.user_title); } catch {} }
           if (s.language) { onSetLanguage(s.language); try { localStorage.setItem('beatrice_language', s.language); } catch {} }
+          if (s.whatsapp_permissions) setWaPermissions(prev => ({ ...prev, ...s.whatsapp_permissions }));
+          if (s.whatsapp_paired) setWaStatus('paired');
+          if (s.whatsapp_phone) setWaPhone(s.whatsapp_phone);
         })
         .subscribe();
 
@@ -1508,6 +1578,22 @@ function MaximusAgent({
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await getWhatsAppStatus(user.uid);
+        if (cancelled) return;
+        setWaStatus(status.status);
+        if (status.qrCode) setWaQrCode(status.qrCode);
+        if (status.phone) setWaPhone(status.phone);
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user.uid]);
+
   const selectedMessages = useMemo(() => {
     if (!selectedSessionId) return messages;
     return messages.filter(m => m.sessionId === selectedSessionId);
@@ -1527,6 +1613,9 @@ function MaximusAgent({
           context_size: contextSize,
           user_title: userTitle,
           language: authLanguage,
+          whatsapp_permissions: waPermissions,
+          whatsapp_paired: waStatus === 'paired',
+          whatsapp_phone: waPhone || null,
           updated_at: new Date().toISOString(),
         });
 
@@ -1537,6 +1626,28 @@ function MaximusAgent({
       handleDbError(e, 'user_settings', 'upsert');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const toggleWaPermission = async (key: string) => {
+    let nextPermissions: Record<string, boolean> = waPermissions;
+    setWaPermissions(prev => {
+      nextPermissions = { ...prev, [key]: !prev[key] };
+      return nextPermissions;
+    });
+
+    try {
+      await supabase
+        .from('user_settings')
+        .upsert({
+          user_id: user.uid,
+          whatsapp_permissions: nextPermissions,
+          whatsapp_paired: waStatus === 'paired',
+          whatsapp_phone: waPhone || null,
+          updated_at: new Date().toISOString(),
+        });
+    } catch (error) {
+      console.error('Failed to save WhatsApp permissions:', error);
     }
   };
 
@@ -2654,6 +2765,15 @@ ${historyContext}
                           setWaStatus('not_found');
                           setWaPhone(null);
                           setWaQrCode(null);
+                          await supabase
+                            .from('user_settings')
+                            .upsert({
+                              user_id: user.uid,
+                              whatsapp_paired: false,
+                              whatsapp_phone: null,
+                              whatsapp_permissions: waPermissions,
+                              updated_at: new Date().toISOString(),
+                            });
                         }}
                         className="px-4 py-2 bg-white/10 hover:bg-red-500/20 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all"
                       >
@@ -2673,6 +2793,17 @@ ${historyContext}
                                 if (s.qrCode) setWaQrCode(s.qrCode);
                                 if (s.phone) setWaPhone(s.phone);
                                 if (s.status === 'paired' || s.status === 'disconnected' || s.error) {
+                                  if (s.status === 'paired') {
+                                    await supabase
+                                      .from('user_settings')
+                                      .upsert({
+                                        user_id: user.uid,
+                                        whatsapp_paired: true,
+                                        whatsapp_phone: s.phone || null,
+                                        whatsapp_permissions: waPermissions,
+                                        updated_at: new Date().toISOString(),
+                                      });
+                                  }
                                   if (waPollRef.current) clearInterval(waPollRef.current);
                                   waPollRef.current = null;
                                   setWaPairing(false);
@@ -2713,7 +2844,7 @@ ${historyContext}
                         <label key={p.key} className="flex items-center justify-between py-1.5 cursor-pointer">
                           <span className="text-xs text-zinc-400">{p.label}</span>
                           <button
-                            onClick={() => setWaPermissions(prev => ({ ...prev, [p.key]: !prev[p.key] }))}
+                            onClick={() => toggleWaPermission(p.key)}
                             className={`w-9 h-5 rounded-full transition-all ${waPermissions[p.key] ? 'bg-[#d0a78b]' : 'bg-zinc-700'}`}
                           >
                             <div className={`w-3.5 h-3.5 rounded-full bg-white transition-all mt-[3px] ${waPermissions[p.key] ? 'ml-[18px]' : 'ml-[3px]'}`} />
@@ -2722,6 +2853,14 @@ ${historyContext}
                       ))}
                     </div>
                   )}
+
+                  <a
+                    href="/adminportal"
+                    className="flex items-center justify-center gap-2 w-full rounded-2xl border border-[#d0a78b]/20 bg-[#d0a78b]/10 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-[#d0a78b] hover:bg-[#d0a78b]/15 transition-colors"
+                  >
+                    <Activity className="w-4 h-4" />
+                    Open Admin Portal
+                  </a>
 
                   {waQrCode && waStatus === 'qr_ready' && (
                     <div className="flex flex-col items-center pt-2 border-t border-white/5">

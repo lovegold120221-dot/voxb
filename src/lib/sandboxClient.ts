@@ -1,7 +1,18 @@
 import type { ComputerTask, ComputerStep, ComputerOutput } from './executionDetector';
 
-const SANDBOX_URL = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SANDBOX_URL)
-  || 'http://168.231.78.113';
+function getBackendUrl(): string {
+  const envUrl = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SANDBOX_URL) || '';
+  try {
+    const stored = localStorage.getItem('beatrice_backend_url');
+    if (stored) return stored.replace(/\/+$/, '');
+  } catch {}
+  if (envUrl) return envUrl.replace(/\/+$/, '');
+  if (typeof window !== 'undefined') {
+    const isLocal = ['localhost', '127.0.0.1', '0.0.0.0'].includes(window.location.hostname);
+    return isLocal ? 'http://localhost:4200' : window.location.origin;
+  }
+  return 'http://localhost:4200';
+}
 
 interface BackendTask {
   taskId: string;
@@ -39,7 +50,7 @@ function mapBackendSteps(steps: { key: string; label: string; status: string }[]
 }
 
 export async function createSandboxTask(type: string, label: string, prompt: string, userEmail?: string, userId?: string, context?: string): Promise<{ taskId: string; task: ComputerTask }> {
-  const res = await fetch(`${SANDBOX_URL}/api/tasks`, {
+  const res = await fetch(`${getBackendUrl()}/api/tasks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type, label, userRequest: prompt, userEmail, userId, context }),
@@ -91,7 +102,7 @@ export function pollTaskStatus(
     }
 
     try {
-      const res = await fetch(`${SANDBOX_URL}/api/tasks/${taskId}`);
+      const res = await fetch(`${getBackendUrl()}/api/tasks/${taskId}`);
       if (!res.ok) {
         if (res.status === 404) return;
         clearInterval(interval);
@@ -156,15 +167,15 @@ export function stopPolling(taskId: string) {
 }
 
 export function getPreviewUrl(taskId: string): string {
-  return `${SANDBOX_URL}/sandbox/tasks/${taskId}/output/index.html`;
+  return `${getBackendUrl()}/sandbox/tasks/${taskId}/output/index.html`;
 }
 
 export function getDownloadUrl(taskId: string, fileName: string): string {
-  return `${SANDBOX_URL}/api/tasks/${taskId}/files/${fileName}`;
+  return `${getBackendUrl()}/api/tasks/${taskId}/files/${fileName}`;
 }
 
 export async function retryTask(taskId: string): Promise<{ taskId: string; task: ComputerTask }> {
-  const res = await fetch(`${SANDBOX_URL}/api/tasks/${taskId}/retry`, {
+  const res = await fetch(`${getBackendUrl()}/api/tasks/${taskId}/retry`, {
     method: 'POST',
   });
 

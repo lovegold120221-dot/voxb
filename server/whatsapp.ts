@@ -11,6 +11,20 @@ import P from 'pino';
 import QRCode from 'qrcode';
 
 type WaStatus = 'init' | 'qr_ready' | 'paired' | 'disconnected' | 'error';
+type WaProvider = 'linked_device' | 'cloud_api';
+
+const WA_PERMISSION_KEYS = [
+  'send_messages',
+  'read_chats',
+  'access_contacts',
+  'manage_contacts',
+  'access_groups',
+  'send_group_messages',
+  'read_group_chats',
+  'view_message_history',
+] as const;
+
+type WaPermission = typeof WA_PERMISSION_KEYS[number];
 
 export interface WaRecentMessage {
   id: string;
@@ -38,6 +52,47 @@ export interface WaContactSummary {
   number: string;
 }
 
+interface WaAdminConfig {
+  provider: WaProvider;
+  displayName: string;
+  businessAccountId: string;
+  phoneNumberId: string;
+  apiVersion: string;
+  accessToken: string;
+  appSecret: string;
+  webhookVerifyToken: string;
+  defaultCountryCode: string;
+  permissions: Record<WaPermission, boolean>;
+  updatedAt: string;
+}
+
+export interface WaAdminConfigInput {
+  provider?: WaProvider;
+  displayName?: string;
+  businessAccountId?: string;
+  phoneNumberId?: string;
+  apiVersion?: string;
+  accessToken?: string;
+  appSecret?: string;
+  webhookVerifyToken?: string;
+  defaultCountryCode?: string;
+  permissions?: Partial<Record<WaPermission, boolean>>;
+}
+
+export interface WaAdminConfigPublic {
+  provider: WaProvider;
+  displayName: string;
+  businessAccountId: string;
+  phoneNumberId: string;
+  apiVersion: string;
+  hasAccessToken: boolean;
+  hasAppSecret: boolean;
+  hasWebhookVerifyToken: boolean;
+  defaultCountryCode: string;
+  permissions: Record<WaPermission, boolean>;
+  updatedAt: string | null;
+}
+
 interface WaSession {
   userId: string;
   status: WaStatus;
@@ -63,6 +118,31 @@ function ensureDir(dir: string) {
 
 function safeUserId(userId: string): string {
   return userId.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function defaultPermissions(): Record<WaPermission, boolean> {
+  return WA_PERMISSION_KEYS.reduce((acc, key) => {
+    acc[key] = false;
+    return acc;
+  }, {} as Record<WaPermission, boolean>);
+}
+
+function normalizePermissions(input?: Partial<Record<WaPermission, boolean>>): Record<WaPermission, boolean> {
+  const base = defaultPermissions();
+  for (const key of WA_PERMISSION_KEYS) {
+    if (typeof input?.[key] === 'boolean') base[key] = input[key] === true;
+  }
+  return base;
+}
+
+function cleanPhoneNumber(input: string, defaultCountryCode = ''): string {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return '';
+  if (raw.startsWith('+') || !defaultCountryCode) return digits;
+  if (digits.startsWith(defaultCountryCode)) return digits;
+  return `${defaultCountryCode}${digits.replace(/^0+/, '')}`;
 }
 
 function messageText(message: any): string {
@@ -93,7 +173,7 @@ export function toWhatsAppJid(value: string, group = false): string {
   if (input.includes('@s.whatsapp.net') || input.includes('@g.us') || input.includes('@broadcast')) {
     return input;
   }
-  const cleaned = input.replace(/[^\d-]/g, '');
+  const cleaned = input.replace(/\D/g, '');
   if (!cleaned) return input;
   return `${cleaned}@${group ? 'g.us' : 's.whatsapp.net'}`;
 }
@@ -142,6 +222,14 @@ export class WhatsAppManager {
     const authDir = path.join(this.authRoot, safeId);
     const dataFile = path.join(authDir, 'session-data.json');
     ensureDir(authDir);
+
+    const current = this.sessions.get(userId);
+    if (current) {
+      this.clearSaveTimer(current);
+      try {
+        current.sock?.end?.(undefined);
+      } catch {}
+    }
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
@@ -277,6 +365,19 @@ export class WhatsAppManager {
     sock.ev.on('contacts.update', updateContacts);
   }
 
+  async getStatusOrStart(userId: string): Promise<{ status: string; qrCode?: string; phone?: string; error?: string } | null> {
+    const current = this.getStatus(userId);
+    if (current) return current;
+
+    const authDir = path.join(this.authRoot, safeUserId(userId));
+    if (fs.existsSync(path.join(authDir, 'creds.json'))) {
+      await this.startSession(userId);
+      return this.getStatus(userId);
+    }
+
+    return null;
+  }
+
   getStatus(userId: string): { status: string; qrCode?: string; phone?: string; error?: string } | null {
     const entry = this.sessions.get(userId);
     if (!entry) return null;
@@ -286,6 +387,154 @@ export class WhatsAppManager {
       phone: entry.phone || undefined,
       error: entry.error || undefined,
     };
+  }
+
+  getAdminConfigPublic(userId: string): WaAdminConfigPublic {
+    const config = this.readAdminConfig(userId);
+    return {
+      provider: config.provider,
+      displayName: config.displayName,
+      businessAccountId: config.businessAccountId,
+      phoneNumberId: config.phoneNumberId,
+      apiVersion: config.apiVersion,
+      hasAccessToken: !!config.accessToken,
+      hasAppSecret: !!config.appSecret,
+      hasWebhookVerifyToken: !!config.webhookVerifyToken,
+      defaultCountryCode: config.defaultCountryCode,
+      permissions: config.permissions,
+      updatedAt: config.updatedAt || null,
+    };
+  }
+
+  saveAdminConfig(userId: string, input: WaAdminConfigInput): WaAdminConfigPublic {
+    const current = this.readAdminConfig(userId);
+    const next: WaAdminConfig = {
+      ...current,
+      provider: input.provider || current.provider,
+      displayName: input.displayName?.trim() ?? current.displayName,
+      businessAccountId: input.businessAccountId?.trim() ?? current.businessAccountId,
+      phoneNumberId: input.phoneNumberId?.trim() ?? current.phoneNumberId,
+      apiVersion: input.apiVersion?.trim() || current.apiVersion || 'v23.0',
+      defaultCountryCode: cleanPhoneNumber(input.defaultCountryCode || current.defaultCountryCode),
+      permissions: input.permissions ? normalizePermissions(input.permissions) : current.permissions,
+      updatedAt: new Date().toISOString(),
+      accessToken: input.accessToken?.trim() ? input.accessToken.trim() : current.accessToken,
+      appSecret: input.appSecret?.trim() ? input.appSecret.trim() : current.appSecret,
+      webhookVerifyToken: input.webhookVerifyToken?.trim() ? input.webhookVerifyToken.trim() : current.webhookVerifyToken,
+    };
+
+    this.writeAdminConfig(userId, next);
+    return this.getAdminConfigPublic(userId);
+  }
+
+  getEffectivePermissions(userId: string, requestPermissions?: Record<string, boolean>): Record<string, boolean> {
+    const config = this.readAdminConfig(userId);
+    if (config.updatedAt) return config.permissions;
+    return requestPermissions || config.permissions;
+  }
+
+  async sendCloudTextMessage(userId: string, to: string, text: string): Promise<{ chatId: string; messageId?: string } | null> {
+    const config = this.readAdminConfig(userId);
+    if (config.provider !== 'cloud_api' || !config.accessToken || !config.phoneNumberId) return null;
+
+    const recipient = cleanPhoneNumber(to, config.defaultCountryCode);
+    if (!recipient) throw new Error('Recipient phone number required');
+
+    const version = config.apiVersion || 'v23.0';
+    const url = `https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(config.phoneNumberId)}/messages`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: recipient,
+        type: 'text',
+        text: { preview_url: false, body: text },
+      }),
+    });
+    const data: any = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error?.message || `WhatsApp Cloud API returned ${response.status}`);
+    }
+
+    return { chatId: `${recipient}@cloud.whatsapp`, messageId: data?.messages?.[0]?.id };
+  }
+
+  async getAdminOverview(userId: string) {
+    const status = await this.getStatusOrStart(userId);
+    const config = this.getAdminConfigPublic(userId);
+    return {
+      config,
+      status: status || { status: 'not_found' },
+      messages: this.getRecentMessages(userId, 20),
+      chats: this.getChats(userId, 20),
+      contactsCount: this.getContacts(userId, 500).length,
+      authRootConfigured: !!this.authRoot,
+    };
+  }
+
+  ingestCloudWebhook(userId: string, payload: any): { accepted: number } {
+    const safeId = safeUserId(userId);
+    const authDir = path.join(this.authRoot, safeId);
+    const dataFile = path.join(authDir, 'session-data.json');
+    ensureDir(authDir);
+
+    let entry = this.sessions.get(userId);
+    if (!entry) {
+      const savedData = readSessionData(dataFile);
+      entry = {
+        userId,
+        status: 'paired',
+        qrCode: null,
+        qrRaw: null,
+        phone: null,
+        sock: null,
+        authDir,
+        dataFile,
+        error: null,
+        recentMessages: savedData.recentMessages,
+        contacts: savedData.contacts,
+        messageById: new Map(),
+        reconnecting: false,
+        saveTimer: null,
+      };
+      this.sessions.set(userId, entry);
+    }
+
+    let accepted = 0;
+    for (const root of payload?.entry || []) {
+      for (const change of root?.changes || []) {
+        for (const msg of change?.value?.messages || []) {
+          const from = msg.from || '';
+          const chatId = from ? `${from}@cloud.whatsapp` : `cloud:${Date.now()}`;
+          const body = msg.text?.body || msg.button?.text || msg.interactive?.button_reply?.title || '[cloud message]';
+          entry.recentMessages.unshift({
+            id: msg.id || `${chatId}:${Date.now()}`,
+            chatId,
+            from,
+            body: String(body).slice(0, 1000),
+            timestamp: msg.timestamp ? Number(msg.timestamp) * 1000 : Date.now(),
+            fromMe: false,
+            isGroup: false,
+            isMedia: !!msg.image || !!msg.video || !!msg.document || !!msg.audio,
+          });
+          accepted++;
+        }
+      }
+    }
+
+    entry.recentMessages = entry.recentMessages.slice(0, 250);
+    writeSessionData(entry);
+    return { accepted };
+  }
+
+  verifyWebhookToken(userId: string, token: unknown): boolean {
+    const expected = this.readAdminConfig(userId).webhookVerifyToken;
+    return !!expected && String(token || '') === expected;
   }
 
   getRecentMessages(userId: string, limit = 20): WaRecentMessage[] {
@@ -392,5 +641,45 @@ export class WhatsAppManager {
       clearInterval(entry.saveTimer);
       entry.saveTimer = null;
     }
+  }
+
+  private adminConfigFile(userId: string): string {
+    const authDir = path.join(this.authRoot, safeUserId(userId));
+    ensureDir(authDir);
+    return path.join(authDir, 'admin-config.json');
+  }
+
+  private readAdminConfig(userId: string): WaAdminConfig {
+    const file = this.adminConfigFile(userId);
+    const fallback: WaAdminConfig = {
+      provider: 'linked_device',
+      displayName: '',
+      businessAccountId: '',
+      phoneNumberId: '',
+      apiVersion: 'v23.0',
+      accessToken: '',
+      appSecret: '',
+      webhookVerifyToken: '',
+      defaultCountryCode: '',
+      permissions: defaultPermissions(),
+      updatedAt: '',
+    };
+
+    try {
+      if (!fs.existsSync(file)) return fallback;
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      return {
+        ...fallback,
+        ...parsed,
+        provider: parsed.provider === 'cloud_api' ? 'cloud_api' : 'linked_device',
+        permissions: normalizePermissions(parsed.permissions),
+      };
+    } catch {
+      return fallback;
+    }
+  }
+
+  private writeAdminConfig(userId: string, config: WaAdminConfig) {
+    fs.writeFileSync(this.adminConfigFile(userId), JSON.stringify(config, null, 2));
   }
 }

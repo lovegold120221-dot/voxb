@@ -208,10 +208,14 @@ app.post('/api/whatsapp/pair', async (req, res) => {
   }
 });
 
-app.get('/api/whatsapp/status/:userId', (req, res) => {
-  const status = waManager.getStatus(req.params.userId);
-  if (!status) { res.json({ status: 'not_found' }); return; }
-  res.json(status);
+app.get('/api/whatsapp/status/:userId', async (req, res) => {
+  try {
+    const status = await waManager.getStatusOrStart(req.params.userId);
+    if (!status) { res.json({ status: 'not_found' }); return; }
+    res.json(status);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to read WhatsApp status' });
+  }
 });
 
 app.get('/api/whatsapp/messages/:userId', (req, res) => {
@@ -235,7 +239,8 @@ app.post('/api/whatsapp/send', async (req, res) => {
   try {
     const { userId, to, text, permissions } = req.body;
     if (!userId || !to || !text) { res.status(400).json({ error: 'userId, to, text required' }); return; }
-    const result = await waTools.handleSendMessage(waManager, userId, permissions, to, text);
+    const effectivePermissions = waManager.getEffectivePermissions(userId, permissions);
+    const result = await waTools.handleSendMessage(waManager, userId, effectivePermissions, to, text);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -247,32 +252,33 @@ app.post('/api/whatsapp/tool', async (req, res) => {
     const { userId, tool, permissions } = req.body;
     const params = req.body.params || {};
     if (!userId || !tool) { res.status(400).json({ error: 'userId and tool required' }); return; }
+    const effectivePermissions = waManager.getEffectivePermissions(userId, permissions);
 
     let result: any;
     switch (tool) {
       case 'sendMessage':
-        result = await waTools.handleSendMessage(waManager, userId, permissions, params.to, params.text);
+        result = await waTools.handleSendMessage(waManager, userId, effectivePermissions, params.to, params.text);
         break;
       case 'readChats':
-        result = await waTools.handleReadChats(waManager, userId, permissions, params.limit);
+        result = await waTools.handleReadChats(waManager, userId, effectivePermissions, params.limit);
         break;
       case 'getContacts':
-        result = await waTools.handleGetContacts(waManager, userId, permissions);
+        result = await waTools.handleGetContacts(waManager, userId, effectivePermissions);
         break;
       case 'addContact':
-        result = await waTools.handleAddContact(waManager, userId, permissions, params.name, params.number || params.to);
+        result = await waTools.handleAddContact(waManager, userId, effectivePermissions, params.name, params.number || params.to);
         break;
       case 'getGroups':
-        result = await waTools.handleGetGroups(waManager, userId, permissions);
+        result = await waTools.handleGetGroups(waManager, userId, effectivePermissions);
         break;
       case 'sendGroupMessage':
-        result = await waTools.handleSendGroupMessage(waManager, userId, permissions, params.groupId || params.chatId || params.groupName, params.text);
+        result = await waTools.handleSendGroupMessage(waManager, userId, effectivePermissions, params.groupId || params.chatId || params.groupName, params.text);
         break;
       case 'readGroupChat':
-        result = await waTools.handleReadGroupChat(waManager, userId, permissions, params.groupId || params.chatId || params.groupName, params.limit);
+        result = await waTools.handleReadGroupChat(waManager, userId, effectivePermissions, params.groupId || params.chatId || params.groupName, params.limit);
         break;
       case 'getMessageHistory':
-        result = await waTools.handleGetMessageHistory(waManager, userId, permissions, params.chatId || params.contactId || params.to || params.name, params.limit);
+        result = await waTools.handleGetMessageHistory(waManager, userId, effectivePermissions, params.chatId || params.contactId || params.to || params.name, params.limit);
         break;
       default:
         res.status(400).json({ error: `Unknown tool: ${tool}` });
@@ -281,6 +287,63 @@ app.post('/api/whatsapp/tool', async (req, res) => {
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/whatsapp/admin/overview/:userId', async (req, res) => {
+  try {
+    res.json(await waManager.getAdminOverview(req.params.userId));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to load WhatsApp admin overview' });
+  }
+});
+
+app.get('/api/whatsapp/admin/config/:userId', (req, res) => {
+  try {
+    res.json({ config: waManager.getAdminConfigPublic(req.params.userId) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to load WhatsApp admin config' });
+  }
+});
+
+app.post('/api/whatsapp/admin/config', (req, res) => {
+  try {
+    const { userId, config } = req.body;
+    if (!userId) { res.status(400).json({ error: 'userId required' }); return; }
+    res.json({ config: waManager.saveAdminConfig(userId, config || {}) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to save WhatsApp admin config' });
+  }
+});
+
+app.post('/api/whatsapp/admin/test-message', async (req, res) => {
+  try {
+    const { userId, to, text } = req.body;
+    if (!userId || !to || !text) { res.status(400).json({ error: 'userId, to, text required' }); return; }
+    const permissions = waManager.getEffectivePermissions(userId);
+    const result = await waTools.handleSendMessage(waManager, userId, permissions, to, text);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to send test message' });
+  }
+});
+
+app.get('/api/whatsapp/webhook/:userId', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && waManager.verifyWebhookToken(req.params.userId, token)) {
+    res.status(200).send(String(challenge || ''));
+    return;
+  }
+  res.sendStatus(403);
+});
+
+app.post('/api/whatsapp/webhook/:userId', (req, res) => {
+  try {
+    res.json(waManager.ingestCloudWebhook(req.params.userId, req.body));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Webhook ingest failed' });
   }
 });
 

@@ -231,12 +231,29 @@ WA_AUTH_ROOT=./.baileys_auth
 VITE_SANDBOX_URL=http://localhost:4200
 ```
 
-Pairing flow:
+Run the full local stack:
+
+```bash
+npm run dev:api
+npm run dev
+```
+
+Admin portal:
+
+Open `/adminportal` after signing in. The portal stores each user's WhatsApp configuration server-side under `WA_AUTH_ROOT/<firebase-user-id>/admin-config.json` and never returns secret values to the browser.
+
+Supported WhatsApp modes:
+
+- Linked Device: scan a WhatsApp Linked Devices QR code. This supports sending messages, recent chat history, contacts, groups, and group sends through the Baileys session.
+- Cloud API: enter a WhatsApp Business Cloud API access token and phone number ID. This supports direct text sends through the official Graph API. Incoming Cloud API webhooks can be pointed at `/api/whatsapp/webhook/<firebase-user-id>`.
+
+Pairing flow for Linked Device:
 
 1. Start the Express backend with a writable `SANDBOX_ROOT` and `WA_AUTH_ROOT`.
-2. In Agent Settings, click `Pair WhatsApp`.
+2. Open `/adminportal` or Agent Settings and click `Pair WhatsApp`.
 3. Scan the QR code from WhatsApp Linked Devices.
-4. Enable only the WhatsApp permission toggles the user wants the assistant to use.
+4. Enable only the WhatsApp permission toggles the user wants Beatrice to use.
+5. Use the test-message panel to verify the active session or Cloud API credentials.
 | `src/components/VideoPage.tsx` | Camera + screen share |
 | `src/components/ComputerPage.tsx` | Document preview + download |
 | `src/components/KaraokeTranscript.tsx` | Word-by-word animated transcript |
