@@ -1965,6 +1965,9 @@ ${historyContext}
 
   return (
     <div className="min-h-screen bg-[#161312] text-zinc-100 flex flex-col h-[100dvh] overflow-y-auto select-none relative">
+      <div
+        className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(208,167,139,0.04),transparent_75%)] pointer-events-none z-0"
+      />
 
       <header className="sticky top-0 w-full bg-[#161312]/95 backdrop-blur-md border-b border-zinc-800/60 px-4 sm:px-6 py-4 flex items-center justify-between z-30 shrink-0">
         <div className="flex items-center">

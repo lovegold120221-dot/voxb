@@ -116,7 +116,7 @@ export function ComputerPage({
     >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,rgba(208,167,139,0.03),transparent_70%)] pointer-events-none" />
 
-      <header className="sticky top-0 w-full bg-[#0d0a08]/95 backdrop-blur-md border-b border-zinc-800/60 px-4 py-3 flex items-center justify-between z-10 shrink-0">
+      <header className="sticky top-0 w-full bg-[#0d0a08]/95 backdrop-blur-md border-b border-zinc-800/60 px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between z-10 shrink-0">
         <button
           onClick={onClose}
           className="p-2 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-all"
@@ -132,7 +132,7 @@ export function ComputerPage({
         <div className="w-9" />
       </header>
 
-      <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+      <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 sm:py-5 space-y-4 sm:space-y-5">
         {/* Status header */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}

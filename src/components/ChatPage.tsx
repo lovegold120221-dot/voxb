@@ -130,7 +130,7 @@ export function ChatPage({
         </div>
 
         <div className="text-center flex flex-col items-center">
-          <h1 className="text-lg font-semibold tracking-wide text-[#d0a78b]">{personaName}</h1>
+          <h1 className="text-base sm:text-lg font-semibold tracking-wide text-[#d0a78b]">{personaName}</h1>
           <div className="flex items-center gap-1.5 -mt-0.5">
             <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)] animate-pulse' : 'bg-zinc-600'}`} />
             <span className="text-[9px] text-zinc-500 tracking-wider uppercase">

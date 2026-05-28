@@ -171,7 +171,7 @@ export function VideoPage({
       <canvas ref={localCanvasRef} className="hidden" />
 
       <header
-        className={`absolute top-0 left-0 right-0 z-20 px-5 py-4 flex items-center justify-between transition-opacity duration-300 ${
+        className={`absolute top-0 left-0 right-0 z-20 px-3 sm:px-5 py-3 sm:py-4 flex items-center justify-between transition-opacity duration-300 ${
           showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >

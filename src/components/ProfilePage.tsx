@@ -152,18 +152,18 @@ export function ProfilePage({ onClose }: ProfilePageProps) {
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 bg-[#161312] flex flex-col h-[100dvh]"
     >
-      <header className="sticky top-0 w-full bg-[#161312]/95 backdrop-blur-md border-b border-zinc-800/60 px-4 py-3 flex items-center justify-between z-10 shrink-0">
+      <header className="sticky top-0 w-full bg-[#161312]/95 backdrop-blur-md border-b border-zinc-800/60 px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between z-10 shrink-0">
         <button
           onClick={onClose}
           className="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800/50 transition-all"
         >
           <X className="w-5 h-5" />
         </button>
-        <h1 className="text-lg font-semibold tracking-wide text-[#d0a78b]">Profile</h1>
+        <h1 className="text-base sm:text-lg font-semibold tracking-wide text-[#d0a78b]">Profile</h1>
         <div className="w-9" />
       </header>
 
-      <div className="flex-1 overflow-y-auto px-4 py-6 space-y-8 max-w-2xl mx-auto w-full">
+      <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-5 sm:py-6 space-y-6 sm:space-y-8 max-w-2xl mx-auto w-full">
         {/* Success/Error toasts */}
         <AnimatePresence>
           {(error || success) && (
