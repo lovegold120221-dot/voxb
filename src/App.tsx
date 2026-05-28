@@ -2161,8 +2161,9 @@ ${historyContext}
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center relative z-10 px-4 -mt-8 sm:-mt-12">
+      <main className="flex-1 flex flex-col items-center relative z-10 px-4">
 
+        <div className="flex-1 flex flex-col items-center justify-center w-full">
         <p className="text-zinc-300 text-xs sm:text-sm font-normal tracking-wide mt-2 px-4 text-center transition-all duration-300">
           {isActive ? 'Beatrice is listening...' : connecting ? 'Connecting...' : 'Beatrice is offline. Connect to begin.'}
         </p>
@@ -2206,8 +2207,9 @@ ${historyContext}
             </div>
           </button>
         </div>
+        </div>
 
-        <div className="w-full max-w-xl px-2 sm:px-8 flex flex-col items-center justify-center text-center min-h-[60px] sm:min-h-[80px] gap-1 transition-opacity duration-700 mt-[120px]">
+        <div className="w-full max-w-xl px-2 sm:px-8 flex flex-col items-center justify-center text-center min-h-[60px] sm:min-h-[80px] gap-1 transition-opacity duration-700 pb-4">
           <AnimatePresence>
             {userTranscript && (
               <KaraokeTranscript
