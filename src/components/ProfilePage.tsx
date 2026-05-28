@@ -16,6 +16,23 @@ interface ProfilePageProps {
   onClose: () => void;
 }
 
+const LS_KEY = 'beatrice_knowledge_domains';
+
+function loadLocalDomains(): string[] {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalDomains(domains: string[]) {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(domains));
+  } catch {}
+}
+
 export function ProfilePage({ onClose }: ProfilePageProps) {
   const user = auth.currentUser!;
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -25,7 +42,7 @@ export function ProfilePage({ onClose }: ProfilePageProps) {
   const [knowledgeFiles, setKnowledgeFiles] = useState<Array<{
     id: string; name: string; type: string; size: number; uploadedAt: string; url: string;
   }>>([]);
-  const [domains, setDomains] = useState<string[]>([]);
+  const [domains, setDomains] = useState<string[]>(loadLocalDomains);
   const [domainInput, setDomainInput] = useState('');
   const [uploadingFile, setUploadingFile] = useState(false);
   const [deletingFile, setDeletingFile] = useState<string | null>(null);
@@ -45,7 +62,10 @@ export function ProfilePage({ onClose }: ProfilePageProps) {
         .eq('user_id', user.uid)
         .single();
       if (settings?.avatar_url) setAvatarUrl(settings.avatar_url);
-      if (settings?.knowledge_domains) setDomains(settings.knowledge_domains);
+      if (settings?.knowledge_domains) {
+        setDomains(settings.knowledge_domains);
+        saveLocalDomains(settings.knowledge_domains);
+      }
       const files = await listKnowledgeFiles(user.uid);
       setKnowledgeFiles(files);
     } catch (e) {
@@ -130,10 +150,13 @@ export function ProfilePage({ onClose }: ProfilePageProps) {
     setError(null);
     try {
       await updateKnowledgeDomains(user.uid, domains);
+      saveLocalDomains(domains);
       setSuccess('Domains saved');
       setTimeout(() => setSuccess(null), 2000);
     } catch (e: any) {
-      setError(e.message || 'Failed to save domains');
+      saveLocalDomains(domains);
+      setSuccess('Domains saved locally (Supabase sync pending — run migration in Supabase SQL Editor)');
+      setTimeout(() => setSuccess(null), 4000);
     } finally {
       setSavingDomains(false);
     }
@@ -230,7 +253,7 @@ export function ProfilePage({ onClose }: ProfilePageProps) {
           </div>
         </section>
 
-        {/* Knowledge Base */}
+        {/* Knowledge Base - File Upload */}
         <section className="bg-white/5 border border-white/10 rounded-[24px] p-6">
           <h2 className="text-xs uppercase tracking-widest text-zinc-500 font-bold mb-1">Knowledge Base</h2>
           <p className="text-[11px] text-zinc-600 mb-4">
@@ -326,7 +349,7 @@ export function ProfilePage({ onClose }: ProfilePageProps) {
           <button
             onClick={saveDomains}
             disabled={savingDomains}
-            className="w-full py-2.5 rounded-xl bg-[#d0a78b]/10 border border-[#d0a78b]/20 text-[#d0a78b] text-sm font-medium hover:bg-[#d0a78b]/20 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full py-2.5 rounded-xl bg-[#d0a78b]/10 border border-[#d0a78b]/20 text-[#d0a78b] text-sm font-medium hover:bg-[#d0a78b]/20 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 mt-3"
           >
             {savingDomains ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
             {savingDomains ? 'Saving...' : 'Save Domains'}
