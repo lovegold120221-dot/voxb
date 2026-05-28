@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { X, Camera, CameraOff, Monitor, MonitorStop } from 'lucide-react';
+import { X, Camera, Monitor, MonitorStop, RotateCw, Square } from 'lucide-react';
 
 interface VideoPageProps {
   onClose: () => void;
   isCameraActive: boolean;
   toggleCamera: () => void;
+  facingMode: 'user' | 'environment';
+  onSwitchCamera: (mode: 'user' | 'environment') => void;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   isActive: boolean;
@@ -17,6 +19,8 @@ export function VideoPage({
   onClose,
   isCameraActive,
   toggleCamera,
+  facingMode,
+  onSwitchCamera,
   videoRef,
   canvasRef,
   isActive,
@@ -31,6 +35,8 @@ export function VideoPage({
   const [isSharingScreen, setIsSharingScreen] = useState(false);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const screenIntervalRef = useRef<any>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const isRecording = isCameraActive || isSharingScreen;
 
   useEffect(() => {
     if (isCameraActive && videoRef.current && localVideoRef.current && !isSharingScreen) {
@@ -58,11 +64,34 @@ export function VideoPage({
     };
   }, []);
 
+  useEffect(() => {
+    if (!isRecording) {
+      setElapsed(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setElapsed(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isRecording]);
+
+  const formatTime = (seconds: number): string => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
   const handleToggle = () => {
     if (isSharingScreen) return;
     setIsConnecting(true);
     toggleCamera();
     setTimeout(() => setIsConnecting(false), 800);
+  };
+
+  const handleSwapCamera = () => {
+    if (!isCameraActive || isSharingScreen) return;
+    const next = facingMode === 'user' ? 'environment' : 'user';
+    onSwitchCamera(next);
   };
 
   const toggleScreenShare = async () => {
@@ -157,7 +186,6 @@ export function VideoPage({
   }, []);
 
   const hasStream = isCameraActive || isSharingScreen;
-  const streamLabel = isSharingScreen ? 'Recording' : 'Recording';
 
   return (
     <motion.div
@@ -183,16 +211,17 @@ export function VideoPage({
         </button>
 
         <div className="flex items-center gap-2">
-          {isSharingScreen && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-md">
-              <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse shadow-[0_0_8px_rgba(249,115,22,0.6)]" />
-              <span className="text-[10px] text-white font-bold uppercase tracking-widest">Screenshare</span>
-            </div>
-          )}
-          {isCameraActive && !isSharingScreen && (
+          {isRecording && (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-md">
               <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]" />
-              <span className="text-[10px] text-white font-bold uppercase tracking-widest">Recording</span>
+              <span className="text-[11px] text-white font-mono font-bold tabular-nums tracking-wider">
+                {formatTime(elapsed)}
+              </span>
+              {isSharingScreen && (
+                <span className="text-[9px] text-orange-300 font-bold uppercase tracking-widest ml-1">
+                  Screenshare
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -204,7 +233,7 @@ export function VideoPage({
         {hasStream ? (
           <video
             ref={localVideoRef}
-            className={`w-full h-full ${isSharingScreen ? 'object-contain' : 'object-cover transform -scale-x-100'}`}
+            className={`w-full h-full ${isSharingScreen ? 'object-contain' : 'object-cover'} ${isCameraActive && facingMode === 'user' ? '-scale-x-100' : ''}`}
             autoPlay
             playsInline
             muted
@@ -212,7 +241,7 @@ export function VideoPage({
         ) : (
           <div className="flex flex-col items-center gap-6 text-center px-8">
             <div className="w-24 h-24 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
-              <CameraOff className="w-10 h-10 text-zinc-600" />
+              <Camera className="w-10 h-10 text-zinc-600" />
             </div>
             <div>
               <p className="text-zinc-400 text-lg font-medium mb-1">Camera is off</p>
@@ -234,19 +263,16 @@ export function VideoPage({
         }`}
       >
         <button
-          onClick={toggleScreenShare}
+          onClick={handleSwapCamera}
+          disabled={!isCameraActive || isSharingScreen}
           className={`w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300 shadow-lg ${
-            isSharingScreen
-              ? 'bg-orange-500/20 border-2 border-orange-500/40 text-orange-500 hover:bg-orange-500/30'
+            !isCameraActive || isSharingScreen
+              ? 'bg-zinc-900/80 border-2 border-zinc-700 text-zinc-500 opacity-50 cursor-not-allowed'
               : 'bg-zinc-900/80 border-2 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:border-[#d0a78b]/40 hover:text-[#d0a78b]'
           }`}
-          title={isSharingScreen ? 'Stop sharing' : 'Share screen'}
+          title="Switch camera"
         >
-          {isSharingScreen ? (
-            <MonitorStop className="w-5 h-5" />
-          ) : (
-            <Monitor className="w-5 h-5" />
-          )}
+          <RotateCw className="w-5 h-5" />
         </button>
 
         <button
@@ -259,11 +285,28 @@ export function VideoPage({
                 ? 'bg-red-500/20 border-2 border-red-500/40 text-red-500 hover:bg-red-500/30'
                 : 'bg-zinc-900/80 border-2 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:border-[#d0a78b]/40 hover:text-[#d0a78b]'
           }`}
+          title={isCameraActive ? 'Stop recording' : 'Start camera'}
         >
           {isCameraActive ? (
-            <CameraOff className="w-6 h-6" />
+            <Square className="w-5 h-5 fill-current" />
           ) : (
             <Camera className="w-6 h-6" />
+          )}
+        </button>
+
+        <button
+          onClick={toggleScreenShare}
+          className={`w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300 shadow-lg ${
+            isSharingScreen
+              ? 'bg-orange-500/20 border-2 border-orange-500/40 text-orange-500 hover:bg-orange-500/30'
+              : 'bg-zinc-900/80 border-2 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:border-[#d0a78b]/40 hover:text-[#d0a78b]'
+          }`}
+          title={isSharingScreen ? 'Stop sharing' : 'Share screen'}
+        >
+          {isSharingScreen ? (
+            <MonitorStop className="w-5 h-5" />
+          ) : (
+            <Monitor className="w-5 h-5" />
           )}
         </button>
       </footer>

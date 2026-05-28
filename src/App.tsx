@@ -681,6 +681,7 @@ function MaximusAgent({
   const [volumes, setVolumes] = useState<number[]>(Array(11).fill(0.05));
 
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [showVideoPage, setShowVideoPage] = useState(false);
   const [showChatPage, setShowChatPage] = useState(false);
   const [chatInput, setChatInput] = useState("");
@@ -818,7 +819,7 @@ function MaximusAgent({
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: 640, height: 480 }
+        video: { facingMode, width: 640, height: 480 }
       });
 
       videoStreamRef.current = stream;
@@ -854,6 +855,26 @@ function MaximusAgent({
       sendTextToLive("The user just turned on their camera. You can now see them. React naturally - greet them like you're on a video call. Make eye contact references, comment on what you see casually, keep it warm and human.");
     } catch (err) {
       console.error("Camera error:", err);
+    }
+  };
+
+  const switchCameraMode = async (mode: 'user' | 'environment') => {
+    if (videoStreamRef.current) {
+      videoStreamRef.current.getTracks().forEach(t => t.stop());
+      videoStreamRef.current = null;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: mode, width: 640, height: 480 }
+      });
+      videoStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      setFacingMode(mode);
+      setIsCameraActive(true);
+    } catch (err) {
+      console.error("Camera switch error:", err);
     }
   };
 
@@ -2168,6 +2189,8 @@ ${historyContext}
             onClose={() => setShowVideoPage(false)}
             isCameraActive={isCameraActive}
             toggleCamera={toggleCamera}
+            facingMode={facingMode}
+            onSwitchCamera={switchCameraMode}
             videoRef={videoRef}
             canvasRef={canvasRef}
             isActive={isActive}
