@@ -772,6 +772,7 @@ function MaximusAgent({
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const screenShareActiveRef = useRef(false);
   const videoStreamRef = useRef<MediaStream | null>(null);
   const videoIntervalRef = useRef<any>(null);
 
@@ -872,6 +873,7 @@ function MaximusAgent({
 
       videoIntervalRef.current = setInterval(() => {
         if (!sessionRef.current || !videoRef.current || !canvasRef.current || !isActive) return;
+        if (screenShareActiveRef.current) return;
 
         const video = videoRef.current;
         const canvas = canvasRef.current;
@@ -2362,6 +2364,7 @@ ${historyContext}
             isActive={isActive}
             sendVideoToLive={sendVideoToLive}
             sendTextToLive={sendTextToLive}
+            onScreenShareChange={(sharing) => { screenShareActiveRef.current = sharing; }}
           />
         )}
       </AnimatePresence>

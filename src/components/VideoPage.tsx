@@ -13,6 +13,7 @@ interface VideoPageProps {
   isActive: boolean;
   sendVideoToLive: (base64Data: string) => void;
   sendTextToLive: (text: string) => void;
+  onScreenShareChange: (sharing: boolean) => void;
 }
 
 export function VideoPage({
@@ -26,6 +27,7 @@ export function VideoPage({
   isActive,
   sendVideoToLive,
   sendTextToLive,
+  onScreenShareChange,
 }: VideoPageProps) {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const localCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -105,6 +107,7 @@ export function VideoPage({
         screenIntervalRef.current = null;
       }
       setIsSharingScreen(false);
+      onScreenShareChange(false);
       sendTextToLive("The user stopped sharing their screen.");
       if (localVideoRef.current && isCameraActive && cameraStream) {
         localVideoRef.current.srcObject = cameraStream;
@@ -125,6 +128,8 @@ export function VideoPage({
         localVideoRef.current.srcObject = stream;
       }
 
+      onScreenShareChange(true);
+
       const track = stream.getVideoTracks()[0];
       track.addEventListener('ended', () => {
         setIsSharingScreen(false);
@@ -133,6 +138,7 @@ export function VideoPage({
           clearInterval(screenIntervalRef.current);
           screenIntervalRef.current = null;
         }
+        onScreenShareChange(false);
         sendTextToLive("The user stopped sharing their screen.");
         if (localVideoRef.current && isCameraActive && cameraStream) {
           localVideoRef.current.srcObject = cameraStream;
@@ -156,12 +162,12 @@ export function VideoPage({
           const ctx = canvas.getContext('2d');
           if (ctx) {
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.4);
             const base64Data = dataUrl.split(',')[1];
             sendVideoToLive(base64Data);
           }
         }
-      }, 1000);
+      }, 300);
     } catch (err) {
       console.error('Screen sharing error:', err);
     }
