@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Upload, Trash2, Link, Globe, User, Mail, Check, Loader2, FileText, AlertCircle } from 'lucide-react';
+import { X, Upload, Trash2, Link, Globe, User, Mail, Check, Loader2, FileText, AlertCircle, LogOut } from 'lucide-react';
 import { auth } from '../firebase';
+import { signOut } from 'firebase/auth';
 import { supabase } from '../lib/supabase';
 import {
   uploadAvatar,
@@ -329,6 +330,17 @@ export function ProfilePage({ onClose }: ProfilePageProps) {
           >
             {savingDomains ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
             {savingDomains ? 'Saving...' : 'Save Domains'}
+          </button>
+        </section>
+
+        {/* Logout */}
+        <section className="pb-8">
+          <button
+            onClick={() => { signOut(auth); onClose(); }}
+            className="w-full py-3 rounded-xl bg-red-500/5 border border-red-500/15 text-red-400 text-sm font-medium hover:bg-red-500/15 transition-colors flex items-center justify-center gap-2"
+          >
+            <LogOut className="w-4 h-4" />
+            Sign Out
           </button>
         </section>
       </div>
