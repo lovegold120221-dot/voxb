@@ -14,7 +14,7 @@ import { ProfilePage } from './components/ProfilePage';
 import { detectExecutionIntent } from './lib/executionDetector';
 import { createSandboxTask, pollTaskStatus, stopPolling, retryTask } from './lib/sandboxClient';
 import { startWhatsAppPairing, getWhatsAppStatus, disconnectWhatsApp } from './lib/whatsappClient';
-import type { ComputerTask } from './lib/executionDetector';
+import type { ComputerTask, ComputerOutput } from './lib/executionDetector';
 
 const LANGUAGES = [
   { code: 'en', label: 'English' },
@@ -754,6 +754,12 @@ function MaximusAgent({
   });
   const waPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const breathLevel = useMemo(() => {
+    if (volumes.length === 0) return 0;
+    const avg = volumes.reduce((a, b) => a + b, 0) / volumes.length;
+    return Math.pow(Math.min(1, avg * 1.5), 0.8);
+  }, [volumes]);
+
   const aiRef = useRef<GoogleGenAI | null>(null);
   const sessionRef = useRef<any>(null);
   const sessionStartingRef = useRef(false);
@@ -919,9 +925,67 @@ function MaximusAgent({
     const title = toolName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const isError = !!error || (result && result.error);
 
+    let formattedContent = '';
+    let outputType: ComputerOutput['type'] = 'text';
+    let fileType = 'txt';
+
+    if (isError) {
+      formattedContent = error || result?.error || 'Unknown error';
+    } else if (toolName === 'get_user_location' && result) {
+      const mapsUrl = `https://www.google.com/maps?q=${result.lat},${result.lng}`;
+      formattedContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your Location</title><style>body{margin:0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0d0a08;color:#f0e6df;display:flex;flex-direction:column;height:100vh}.map-wrap{flex:1;min-height:0}iframe{width:100%;height:100%;border:0}.info{padding:16px 20px;background:#1a1512;border-top:1px solid #2a1f18;text-align:center}p{margin:4px 0;font-size:14px;color:#d0a78b}span{color:#988c84}</style></head><body><div class="map-wrap"><iframe src="${mapsUrl}&output=embed" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe></div><div class="info"><p>📍 Your location</p><span>Accuracy: ±${Math.round(result.accuracy)}m</span></div></body></html>`;
+      outputType = 'dashboard';
+      fileType = 'html';
+    } else if (toolName === 'list_calendar_events' && result?.items) {
+      const events = result.items.map((e: any) => {
+        const start = e.start?.dateTime || e.start?.date || 'TBD';
+        const t = start.includes('T') ? new Date(start).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : start;
+        return `<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #2a1f18"><div style="width:4px;height:4px;border-radius:50%;background:#d0a78b;flex-shrink:0"></div><div style="flex:1"><p style="margin:0;font-size:14px;color:#f0e6df">${e.summary || 'Untitled'}</p><p style="margin:2px 0 0;font-size:11px;color:#988c84">${t}</p></div></div>`;
+      }).join('');
+      const count = result.items.length;
+      formattedContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Calendar Events</title><style>body{margin:0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0d0a08;color:#f0e6df;padding:20px}h2{margin:0 0 4px;font-size:18px;color:#d0a78b}.count{font-size:12px;color:#6b5d53;margin-bottom:16px}.empty{text-align:center;padding:40px 20px;color:#6b5d53}</style></head><body><h2>📅 Upcoming Events</h2><p class="count">${count} event${count !== 1 ? 's' : ''}</p>${events || '<p class="empty">No upcoming events</p>'}</body></html>`;
+      outputType = 'dashboard';
+      fileType = 'html';
+    } else if (toolName === 'list_gmail_messages' && result?.messages) {
+      const msgs = result.messages.map((m: any) =>
+        `<div style="display:flex;align-items:flex-start;gap:10px;padding:12px 16px;border-bottom:1px solid #2a1f18"><div style="width:32px;height:32px;border-radius:50%;background:#2a1f18;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px;color:#d0a78b">${(m.from?.[0] || '?').toUpperCase()}</div><div style="flex:1;min-width:0"><p style="margin:0;font-size:13px;color:#f0e6df;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.subject || '(no subject)'}</p><p style="margin:2px 0 0;font-size:11px;color:#988c84">${m.from || ''}</p><p style="margin:2px 0 0;font-size:11px;color:#6b5d53;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.snippet || ''}</p></div></div>`
+      ).join('');
+      formattedContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Recent Emails</title><style>body{margin:0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0d0a08;color:#f0e6df;padding:20px}h2{margin:0 0 4px;font-size:18px;color:#d0a78b}.count{font-size:12px;color:#6b5d53;margin-bottom:16px}</style></head><body><h2>📬 Recent Emails</h2><p class="count">${result.messages.length} message${result.messages.length !== 1 ? 's' : ''}</p>${msgs}</body></html>`;
+      outputType = 'dashboard';
+      fileType = 'html';
+    } else if (toolName === 'list_google_tasks' && result?.items) {
+      const tasks = result.items.map((t: any) =>
+        `<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid #2a1f18"><div style="width:16px;height:16px;border-radius:50%;border:2px solid #5a4a40;flex-shrink:0"></div><p style="margin:0;font-size:13px;color:#f0e6df">${t.title || 'Untitled'}</p></div>`
+      ).join('');
+      formattedContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tasks</title><style>body{margin:0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0d0a08;color:#f0e6df;padding:20px}h2{margin:0 0 4px;font-size:18px;color:#d0a78b}.count{font-size:12px;color:#6b5d53;margin-bottom:16px}</style></head><body><h2>📋 Tasks</h2><p class="count">${result.items.length} task${result.items.length !== 1 ? 's' : ''}</p>${tasks}</body></html>`;
+      outputType = 'dashboard';
+      fileType = 'html';
+    } else if (toolName === 'list_drive_files' && result?.files) {
+      const files = result.files.map((f: any) =>
+        `<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid #2a1f18"><div style="font-size:16px;flex-shrink:0">📄</div><div style="flex:1;min-width:0"><p style="margin:0;font-size:13px;color:#f0e6df;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${f.name}</p><p style="margin:1px 0 0;font-size:10px;color:#6b5d53">${(f.mimeType || '').split('/').pop()}</p></div></div>`
+      ).join('');
+      formattedContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Drive Files</title><style>body{margin:0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0d0a08;color:#f0e6df;padding:20px}h2{margin:0 0 4px;font-size:18px;color:#d0a78b}.count{font-size:12px;color:#6b5d53;margin-bottom:16px}</style></head><body><h2>📁 Drive Files</h2><p class="count">${result.files.length} file${result.files.length !== 1 ? 's' : ''}</p>${files}</body></html>`;
+      outputType = 'dashboard';
+      fileType = 'html';
+    } else if (toolName === 'search_youtube' && result?.items) {
+      const vids = result.items.map((v: any) =>
+        `<div style="display:flex;align-items:flex-start;gap:10px;padding:12px 16px;border-bottom:1px solid #2a1f18"><div style="width:80px;height:45px;border-radius:6px;background:#2a1f18;flex-shrink:0;overflow:hidden"><img src="${v.snippet?.thumbnails?.default?.url || ''}" style="width:100%;height:100%;object-fit:cover" alt=""></div><div style="flex:1;min-width:0"><p style="margin:0;font-size:13px;color:#f0e6df">${v.snippet?.title || ''}</p><p style="margin:2px 0 0;font-size:11px;color:#988c84">${v.snippet?.channelTitle || ''}</p></div></div>`
+      ).join('');
+      formattedContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>YouTube Results</title><style>body{margin:0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0d0a08;color:#f0e6df;padding:20px}h2{margin:0 0 4px;font-size:18px;color:#d0a78b}.count{font-size:12px;color:#6b5d53;margin-bottom:16px}</style></head><body><h2>▶ YouTube Results</h2><p class="count">${result.items.length} result${result.items.length !== 1 ? 's' : ''}</p>${vids}</body></html>`;
+      outputType = 'dashboard';
+      fileType = 'html';
+    } else if (toolName === 'create_google_task' && result) {
+      formattedContent = `✅ Task created: ${result.title || 'Untitled'}`;
+    } else if (toolName === 'send_gmail_message' && result) {
+      formattedContent = `✅ Email sent successfully${result.id ? ' (ID: ' + result.id + ')' : ''}`;
+    } else {
+      formattedContent = JSON.stringify(result, null, 2);
+      fileType = 'json';
+    }
+
     const task: ComputerTask = {
       id: 'tool-' + Math.random().toString(36).substring(7),
-      type: 'text',
+      type: outputType,
       label: title,
       status: isError ? 'error' : 'done',
       steps: [
@@ -929,12 +993,12 @@ function MaximusAgent({
         { key: 'tool-done', label: isError ? 'Failed' : 'Completed successfully', done: true, active: false },
       ],
       output: {
-        type: 'text',
+        type: outputType,
         title: isError ? `${title} — Error` : `${title} — Result`,
         content: isError
           ? (error || result?.error || 'Unknown error')
-          : JSON.stringify(result, null, 2),
-        fileType: 'json',
+          : formattedContent,
+        fileType,
       },
       createdAt: Date.now(),
     };
@@ -2112,7 +2176,13 @@ ${historyContext}
 
         <div className="relative flex items-center justify-center w-full h-[200px] sm:h-[260px]">
           <div
-            className={`absolute w-48 h-48 sm:w-64 sm:h-64 ${isActive ? 'bg-[#d0a78b]/25' : 'bg-[#d0a78b]/10'} rounded-full blur-3xl transition-all duration-700 ${isActive ? 'orb-pulse-active' : ''}`}
+            className={`absolute w-48 h-48 sm:w-64 sm:h-64 rounded-full blur-3xl transition-none`}
+            style={{
+              background: isActive
+                ? `radial-gradient(circle, rgba(208,167,139,${0.12 + breathLevel * 0.38}) 0%, transparent 70%)`
+                : 'radial-gradient(circle, rgba(208,167,139,0.06) 0%, transparent 70%)',
+              transform: `scale(${isActive ? 1 + breathLevel * 0.3 : 1})`,
+            }}
           />
 
           <button
@@ -2144,7 +2214,7 @@ ${historyContext}
           </button>
         </div>
 
-        <div className="w-full max-w-xl px-2 sm:px-8 flex flex-col items-center justify-center text-center min-h-[60px] sm:min-h-[80px] gap-1 transition-opacity duration-700">
+        <div className="w-full max-w-xl px-2 sm:px-8 flex flex-col items-center justify-center text-center min-h-[60px] sm:min-h-[80px] gap-1 transition-opacity duration-700 mt-[120px]">
           <AnimatePresence>
             {userTranscript && (
               <KaraokeTranscript
