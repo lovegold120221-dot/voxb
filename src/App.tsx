@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { auth } from './firebase';
-import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, updateProfile } from 'firebase/auth';
 import { supabase, handleDbError } from './lib/supabase';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from '@google/genai';
 import { AudioRecorder, AudioStreamer } from './lib/audio';
@@ -341,6 +341,7 @@ export default function App() {
   const [authLanguage, setAuthLanguage] = useState(() => {
     try { return localStorage.getItem('beatrice_language') || 'en'; } catch { return 'en'; }
   });
+  const [authDisplayName, setAuthDisplayName] = useState('');
   const [authError, setAuthError] = useState('');
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
@@ -456,7 +457,10 @@ export default function App() {
     if (authPassword.length < 6) { setAuthError('Password must be at least 6 characters'); return; }
     try {
       if (authMode === 'signup') {
-        await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+        const cred = await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+        if (authDisplayName.trim()) {
+          await updateProfile(cred.user, { displayName: authDisplayName.trim() });
+        }
       } else {
         await signInWithEmailAndPassword(auth, authEmail, authPassword);
       }
@@ -551,6 +555,17 @@ export default function App() {
                 className="flex-1 bg-[#0A0A0B] text-zinc-200 placeholder-zinc-600 text-sm px-4 py-3 outline-none"
               />
             </div>
+            {authMode === 'signup' && (
+              <div className="flex rounded-xl overflow-hidden border border-zinc-800 focus-within:border-amber-500/40 transition-colors">
+                <input
+                  type="text"
+                  placeholder="Your Name"
+                  value={authDisplayName}
+                  onChange={e => setAuthDisplayName(e.target.value)}
+                  className="flex-1 bg-[#0A0A0B] text-zinc-200 placeholder-zinc-600 text-sm px-4 py-3 outline-none"
+                />
+              </div>
+            )}
             {authError && (
               <p className="text-red-400 text-xs text-center">{authError}</p>
             )}
@@ -656,6 +671,7 @@ export default function App() {
       user={user}
       googleToken={googleToken}
       authLanguage={authLanguage}
+      onSetLanguage={setAuthLanguage}
       onLogout={handleLogout}
       onLogin={handleLogin}
     />
@@ -666,12 +682,14 @@ function MaximusAgent({
   user,
   googleToken,
   authLanguage,
+  onSetLanguage,
   onLogout,
   onLogin
 }: {
   user: User;
   googleToken: string | null;
   authLanguage: string;
+  onSetLanguage: (lang: string) => void;
   onLogout: () => void;
   onLogin: () => void;
 }) {
@@ -703,6 +721,9 @@ function MaximusAgent({
   const [customPrompt, setCustomPrompt] = useState("");
   const [selectedVoice, setSelectedVoice] = useState("Aoede");
   const [contextSize, setContextSize] = useState(20);
+  const [userTitle, setUserTitle] = useState(() => {
+    try { return localStorage.getItem('beatrice_userTitle') || 'Boss'; } catch { return 'Boss'; }
+  });
   const [isSaving, setIsSaving] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [showProfilePage, setShowProfilePage] = useState(false);
@@ -1219,6 +1240,8 @@ function MaximusAgent({
         if (settingsData.custom_prompt !== null) setCustomPrompt(settingsData.custom_prompt);
         if (settingsData.selected_voice) setSelectedVoice(settingsData.selected_voice);
         if (settingsData.context_size !== undefined) setContextSize(settingsData.context_size);
+        if (settingsData.user_title) { setUserTitle(settingsData.user_title); try { localStorage.setItem('beatrice_userTitle', settingsData.user_title); } catch {} }
+        if (settingsData.language) { onSetLanguage(settingsData.language); try { localStorage.setItem('beatrice_language', settingsData.language); } catch {} }
       }
 
       const settingsChannel = supabase
@@ -1230,6 +1253,8 @@ function MaximusAgent({
           if (s.custom_prompt !== null) setCustomPrompt(s.custom_prompt);
           if (s.selected_voice) setSelectedVoice(s.selected_voice);
           if (s.context_size !== undefined) setContextSize(s.context_size);
+          if (s.user_title) { setUserTitle(s.user_title); try { localStorage.setItem('beatrice_userTitle', s.user_title); } catch {} }
+          if (s.language) { onSetLanguage(s.language); try { localStorage.setItem('beatrice_language', s.language); } catch {} }
         })
         .subscribe();
 
@@ -1302,9 +1327,13 @@ function MaximusAgent({
           custom_prompt: customPrompt,
           selected_voice: selectedVoice,
           context_size: contextSize,
+          user_title: userTitle,
+          language: authLanguage,
           updated_at: new Date().toISOString(),
         });
 
+      try { localStorage.setItem('beatrice_userTitle', userTitle); } catch {}
+      try { localStorage.setItem('beatrice_language', authLanguage); } catch {}
       setShowSettings(false);
     } catch (e) {
       handleDbError(e, 'user_settings', 'upsert');
@@ -1338,8 +1367,11 @@ function MaximusAgent({
 
     const dynamicSystemInstruction = `
 Visible conversation name: ${personaName}.
-User display name: ${user.displayName || 'Commander'}.
 User language: ${authLanguage}.
+
+Address the user as "${userTitle} ${user.displayName?.split(' ')[0] || 'Commander'}".
+Always greet and refer to them using this title followed by their first name.
+CRITICAL: Never call them by anything else — their title is ${userTitle}, their name is ${user.displayName?.split(' ')[0] || 'Commander'}.
 
 The visible name is only a label. Do not build the personality around it.
 The voice personality is controlled by VOICE_PERSONALITY_PROMPT.
@@ -2484,6 +2516,41 @@ ${historyContext}
                     placeholder="Enter character traits or specific rules..."
                     className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-amber-500/50 transition-colors h-32 resize-none text-white"
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold ml-1">
+                    What Should Beatrice Call You
+                  </label>
+                  <input
+                    type="text"
+                    value={userTitle}
+                    onChange={(e) => setUserTitle(e.target.value)}
+                    placeholder="e.g. Boss"
+                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-amber-500/50 transition-colors text-white"
+                    aria-label="User Title"
+                  />
+                  <p className="text-[9px] text-zinc-600 ml-1">
+                    Beatrice will call you "{userTitle} {user.displayName?.split(' ')[0] || 'YourName'}"
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold ml-1">
+                    Language
+                  </label>
+                  <div className="flex rounded-2xl overflow-hidden border border-white/10 focus-within:border-amber-500/50 transition-colors">
+                    <select
+                      value={authLanguage}
+                      onChange={(e) => { onSetLanguage(e.target.value); try { localStorage.setItem('beatrice_language', e.target.value); } catch {} }}
+                      className="w-full bg-white/5 text-white px-5 py-4 outline-none appearance-none cursor-pointer text-sm"
+                      aria-label="Language"
+                    >
+                      {LANGUAGES.map(l => (
+                        <option key={l.code} value={l.code} className="bg-[#0A0A0B]">{l.label}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <div className="space-y-4">

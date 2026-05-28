@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS user_settings (
   custom_prompt TEXT DEFAULT '',
   selected_voice TEXT DEFAULT 'Aoede',
   context_size INT DEFAULT 20,
+  user_title TEXT DEFAULT 'Boss',
+  language TEXT DEFAULT 'en',
   avatar_url TEXT,
   knowledge_domains TEXT[] DEFAULT '{}',
   whatsapp_permissions JSONB DEFAULT '{"send_messages":false,"read_chats":false,"access_contacts":false,"manage_contacts":false,"access_groups":false,"send_group_messages":false,"read_group_chats":false,"manage_media":false,"view_message_history":false}'::jsonb,
@@ -44,6 +46,10 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_files_user_id ON knowledge_files(user_i
 ALTER TABLE messages DISABLE ROW LEVEL SECURITY;
 ALTER TABLE user_settings DISABLE ROW LEVEL SECURITY;
 ALTER TABLE knowledge_files DISABLE ROW LEVEL SECURITY;
+
+-- Add new columns to existing user_settings table (idempotent)
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS user_title TEXT DEFAULT 'Boss';
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'en';
 
 -- 3. Enable Realtime for tables
 DO $$
