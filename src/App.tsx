@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { auth, db, handleFirestoreError, OperationType } from './firebase';
+import { auth } from './firebase';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp, collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { supabase, handleDbError } from './lib/supabase';
 import { GoogleGenAI, LiveServerMessage, Modality, Type } from '@google/genai';
 import { AudioRecorder, AudioStreamer } from './lib/audio';
 import { Square, Loader2, Power, Check, Settings, X, Save, Activity, Video, MessageSquare } from 'lucide-react';
@@ -370,24 +370,25 @@ export default function App() {
             setGoogleToken(restored);
           }
 
-          const userRef = doc(db, 'users', u.uid);
-          const userSnap = await getDoc(userRef);
+          const { data: existing } = await supabase
+            .from('user_settings')
+            .select('user_id')
+            .eq('user_id', u.uid)
+            .single();
 
-          if (!userSnap.exists()) {
-            await setDoc(userRef, {
-              displayName: u.displayName || 'Commander',
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-              settings: {
-                personaName: "Beatrice",
-                selectedVoice: "Charon",
-                customPrompt: "",
-                contextSize: 20
-              }
-            });
+          if (!existing) {
+            await supabase
+              .from('user_settings')
+              .insert({
+                user_id: u.uid,
+                persona_name: 'Beatrice',
+                selected_voice: 'Charon',
+                custom_prompt: '',
+                context_size: 20,
+              });
           }
         } catch (error) {
-          handleFirestoreError(error, OperationType.WRITE, `users/${u.uid}`);
+          handleDbError(error, 'user_settings', 'create');
         }
       }
 
@@ -958,60 +959,95 @@ function MaximusAgent({
   }, [isActive]);
 
   useEffect(() => {
-    const historyQuery = query(
-      collection(db, 'users', user.uid, 'messages'),
-      orderBy('timestamp', 'desc')
-    );
+    let unsubMessages: (() => void) | null = null;
+    let unsubSettings: (() => void) | null = null;
 
-    const unsubHistory = onSnapshot(
-      historyQuery,
-      (snap) => {
-        const msgs: string[] = [];
-        const docs = snap.docs.reverse();
-        const messageList: ChatMessage[] = [];
+    (async () => {
+      const { data: initialMessages, error: loadError } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('user_id', user.uid)
+        .order('created_at', { ascending: false });
 
-        docs.forEach(d => {
-          const m = d.data() as ChatMessage;
-          msgs.push(`${m.role.toUpperCase()}: ${m.text}`);
-          messageList.push(m);
+      if (loadError) {
+        handleDbError(loadError, 'messages', 'list');
+        return;
+      }
+
+      const msgs: string[] = [];
+      const messageList: ChatMessage[] = [];
+
+      (initialMessages || []).reverse().forEach((m: any) => {
+        msgs.push(`${m.role.toUpperCase()}: ${m.text}`);
+        messageList.push({
+          role: m.role,
+          text: m.text,
+          sessionId: m.session_id,
+          timestamp: m.created_at,
         });
+      });
 
-        setMessages(messageList);
+      setMessages(messageList);
 
-        if (msgs.length > 0) {
-          const contextMsgs = msgs.slice(-contextSize);
-          setHistoryContext("Previous conversation for context memory:\n" + contextMsgs.join("\n"));
-        } else {
-          setHistoryContext("");
-        }
-
-        if (messageList.length > 0 && !selectedSessionId) {
-          const newest = [...messageList].reverse().find(m => m.sessionId);
-          if (newest?.sessionId) setSelectedSessionId(newest.sessionId);
-        }
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/messages`);
+      if (msgs.length > 0) {
+        const contextMsgs = msgs.slice(-contextSize);
+        setHistoryContext("Previous conversation for context memory:\n" + contextMsgs.join("\n"));
+      } else {
+        setHistoryContext("");
       }
-    );
 
-    const unsubSettings = onSnapshot(
-      doc(db, 'users', user.uid),
-      (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
-          const s = data.settings || {};
-
-          if (s.personaName) setPersonaName(s.personaName);
-          if (s.customPrompt) setCustomPrompt(s.customPrompt);
-          if (s.selectedVoice) setSelectedVoice(s.selectedVoice);
-          if (s.contextSize !== undefined) setContextSize(s.contextSize);
-        }
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+      if (messageList.length > 0 && !selectedSessionId) {
+        const newest = [...messageList].reverse().find(m => m.sessionId);
+        if (newest?.sessionId) setSelectedSessionId(newest.sessionId);
       }
-    );
+
+      const messagesChannel = supabase
+        .channel('messages_changes')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `user_id=eq.${user.uid}` }, (payload) => {
+          const m = payload.new as any;
+          if (!m || !m.text) return;
+          const msg: ChatMessage = {
+            role: m.role,
+            text: m.text,
+            sessionId: m.session_id,
+            timestamp: m.created_at,
+          };
+          setMessages(prev => {
+            if (prev.some(p => p.timestamp === m.created_at && p.text === m.text)) return prev;
+            return [...prev, msg];
+          });
+        })
+        .subscribe();
+
+      unsubMessages = () => { supabase.removeChannel(messagesChannel); };
+
+      const { data: settingsData, error: settingsError } = await supabase
+        .from('user_settings')
+        .select('*')
+        .eq('user_id', user.uid)
+        .single();
+
+      if (!settingsError && settingsData) {
+        if (settingsData.persona_name) setPersonaName(settingsData.persona_name);
+        if (settingsData.custom_prompt !== null) setCustomPrompt(settingsData.custom_prompt);
+        if (settingsData.selected_voice) setSelectedVoice(settingsData.selected_voice);
+        if (settingsData.context_size !== undefined) setContextSize(settingsData.context_size);
+      }
+
+      const settingsChannel = supabase
+        .channel('settings_changes')
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'user_settings', filter: `user_id=eq.${user.uid}` }, (payload) => {
+          const s = payload.new as any;
+          if (!s) return;
+          if (s.persona_name) setPersonaName(s.persona_name);
+          if (s.custom_prompt !== null) setCustomPrompt(s.custom_prompt);
+          if (s.selected_voice) setSelectedVoice(s.selected_voice);
+          if (s.context_size !== undefined) setContextSize(s.context_size);
+        })
+        .subscribe();
+
+      unsubSettings = () => { supabase.removeChannel(settingsChannel); };
+    })();
 
     const apiKey = getGeminiApiKey();
 
@@ -1022,8 +1058,8 @@ function MaximusAgent({
     audioStreamerRef.current = new AudioStreamer();
 
     return () => {
-      unsubHistory();
-      unsubSettings();
+      if (unsubMessages) unsubMessages();
+      if (unsubSettings) unsubSettings();
       stopSession();
     };
   }, [user.uid, contextSize]);
@@ -1062,25 +1098,20 @@ function MaximusAgent({
     setIsSaving(true);
 
     try {
-      const userRef = doc(db, 'users', user.uid);
-
-      await setDoc(
-        userRef,
-        {
-          settings: {
-            personaName,
-            customPrompt,
-            selectedVoice,
-            contextSize
-          },
-          updatedAt: serverTimestamp()
-        },
-        { merge: true }
-      );
+      await supabase
+        .from('user_settings')
+        .upsert({
+          user_id: user.uid,
+          persona_name: personaName,
+          custom_prompt: customPrompt,
+          selected_voice: selectedVoice,
+          context_size: contextSize,
+          updated_at: new Date().toISOString(),
+        });
 
       setShowSettings(false);
     } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, `users/${user.uid}`);
+      handleDbError(e, 'user_settings', 'upsert');
     } finally {
       setIsSaving(false);
     }
@@ -1662,16 +1693,16 @@ ${historyContext}
 
   const saveMessage = async (role: 'user' | 'model', text: string) => {
     try {
-      const messagesRef = collection(db, 'users', user.uid, 'messages');
-
-      await setDoc(doc(messagesRef), {
-        role,
-        text,
-        sessionId: sessionIdRef.current,
-        timestamp: serverTimestamp()
-      });
+      await supabase
+        .from('messages')
+        .insert({
+          user_id: user.uid,
+          session_id: sessionIdRef.current,
+          role,
+          text,
+        });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/messages`);
+      handleDbError(error, 'messages', 'insert');
     }
   };
 
