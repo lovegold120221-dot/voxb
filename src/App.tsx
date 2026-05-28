@@ -393,7 +393,7 @@ export default function App() {
               .from('user_settings')
               .insert({
                 user_id: u.uid,
-                persona_name: 'Eburon AI Beatrice',
+                persona_name: 'Beatrice',
                 selected_voice: 'Aoede',
                 custom_prompt: '',
                 context_size: 20,
@@ -528,7 +528,7 @@ export default function App() {
             </div>
           </div>
           <h1 className="text-3xl font-light tracking-tighter mb-1 text-white font-sans uppercase">
-            Eburon AI Beatrice
+            Beatrice
           </h1>
           <p className="text-amber-500/40 text-center mb-8 leading-relaxed font-mono text-[10px] uppercase tracking-[0.2em]">
             Authenticated Voice Intelligence
@@ -698,7 +698,7 @@ function MaximusAgent({
   const [computerOutput, setComputerOutput] = useState<{ content: string; title: string } | null>(null);
   const [computerPreviewUrl, setComputerPreviewUrl] = useState<string | null>(null);
   const [computerDownloadUrl, setComputerDownloadUrl] = useState<string | null>(null);
-  const [personaName, setPersonaName] = useState("Eburon AI Beatrice");
+  const [personaName, setPersonaName] = useState("Beatrice");
   const [customPrompt, setCustomPrompt] = useState("");
   const [selectedVoice, setSelectedVoice] = useState("Aoede");
   const [contextSize, setContextSize] = useState(20);
@@ -1964,31 +1964,28 @@ ${historyContext}
   };
 
   return (
-    <div className="min-h-screen bg-[#161312] text-zinc-100 flex flex-col h-[100dvh] overflow-hidden select-none relative">
-      <div
-        className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(208,167,139,0.04),transparent_75%)] pointer-events-none z-0"
-      />
+    <div className="min-h-screen bg-[#161312] text-zinc-100 flex flex-col h-[100dvh] overflow-y-auto select-none relative">
 
-      <header className="sticky top-0 w-full bg-[#161312]/95 backdrop-blur-md border-b border-zinc-800/60 px-6 py-4 flex items-center justify-between z-30">
+      <header className="sticky top-0 w-full bg-[#161312]/95 backdrop-blur-md border-b border-zinc-800/60 px-4 sm:px-6 py-4 flex items-center justify-between z-30 shrink-0">
         <div className="flex items-center">
           <button
             onClick={() => setShowSettings(true)}
             className="p-1.5 -ml-1.5 rounded-lg text-zinc-400 hover:text-[#d0a78b] hover:bg-zinc-800/50 transition-all duration-300"
             aria-label="Open Settings"
           >
-            <Settings className="w-6 h-6" />
+            <Settings className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
         </div>
 
         <div className="text-center flex flex-col items-center">
-          <h1 className="text-xl font-semibold tracking-wide text-[#d0a78b]">{personaName}</h1>
-          <p className="text-[9px] text-zinc-500 tracking-[0.22em] lowercase -mt-0.5">eburon ai</p>
+          <h1 className="text-lg sm:text-xl font-semibold tracking-wide text-[#d0a78b]">{personaName}</h1>
+          <p className="text-[8px] sm:text-[9px] text-zinc-500 tracking-[0.22em] lowercase -mt-0.5">eburon ai</p>
         </div>
 
         <div className="flex items-center">
           <button
             onClick={() => setShowProfilePage(true)}
-            className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 overflow-hidden flex items-center justify-center hover:border-[#d0a78b]/50 transition-all duration-300"
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-zinc-900 border border-zinc-800 overflow-hidden flex items-center justify-center hover:border-[#d0a78b]/50 transition-all duration-300"
             aria-label="User Profile"
           >
             {user.photoURL ? (
@@ -2000,47 +1997,47 @@ ${historyContext}
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-start relative z-10 pt-4 pb-24 overflow-hidden">
+      <main className="flex-1 flex flex-col items-center justify-start relative z-10 pt-4 sm:pt-6 px-4">
 
-        <p className="text-zinc-300 text-sm font-normal tracking-wide mt-2 px-6 text-center transition-all duration-300">
-          {isActive ? 'Beatrice is listening...' : connecting ? 'Connecting...' : 'Beatrice is offline. Tap to Start.'}
+        <p className="text-zinc-300 text-xs sm:text-sm font-normal tracking-wide mt-2 px-4 text-center transition-all duration-300">
+          {isActive ? 'Beatrice is listening...' : connecting ? 'Connecting...' : 'Beatrice is offline. Connect to begin.'}
         </p>
 
-        <div className="relative flex-1 flex items-center justify-center w-full max-h-[300px] mt-6">
+        <div className="relative flex-1 flex items-center justify-center w-full max-h-[260px] sm:max-h-[300px] mt-4 sm:mt-6">
           <div
-            className={`absolute w-72 h-72 ${isActive ? 'bg-[#d0a78b]/25' : 'bg-[#d0a78b]/10'} rounded-full blur-3xl transition-all duration-700 ${isActive ? 'orb-pulse-active' : ''}`}
+            className={`absolute w-56 h-56 sm:w-72 sm:h-72 ${isActive ? 'bg-[#d0a78b]/25' : 'bg-[#d0a78b]/10'} rounded-full blur-3xl transition-all duration-700 ${isActive ? 'orb-pulse-active' : ''}`}
           />
 
           <button
             onClick={isActive ? stopSession : startSession}
             disabled={connecting}
-            className="relative w-52 h-52 rounded-full bg-[#1c1614]/60 border border-[#d0a78b]/20 overflow-hidden flex items-center justify-center transition-all duration-500 hover:border-[#d0a78b] hover:shadow-[0_0_55px_rgba(208,167,139,0.3)] active:scale-[0.98]"
+            className="relative w-40 h-40 sm:w-52 sm:h-52 rounded-full bg-[#1c1614]/60 border border-[#d0a78b]/20 overflow-hidden flex items-center justify-center transition-all duration-500 hover:border-[#d0a78b] hover:shadow-[0_0_55px_rgba(208,167,139,0.3)] active:scale-[0.98]"
             aria-label="Toggle Voice Assistant"
           >
             <div className="absolute inset-0 bg-black/5 backdrop-blur-[12px] z-10 rounded-full pointer-events-none" />
 
             <div className="absolute inset-0 w-full h-full flex items-center justify-center transition-transform duration-100 ease-out z-0">
-              <div className="blob-1 absolute w-48 h-48 rounded-full bg-[radial-gradient(circle,rgba(208,167,139,0.65)_0%,transparent_70%)] blur-md" />
-              <div className="blob-2 absolute w-44 h-44 rounded-full bg-[radial-gradient(circle,rgba(171,123,96,0.45)_0%,transparent_70%)] blur-md" />
-              <div className="blob-3 absolute w-40 h-40 rounded-full bg-[radial-gradient(circle,rgba(235,208,188,0.55)_0%,transparent_70%)] blur-md" />
-              <div className="absolute w-16 h-16 rounded-full bg-[#d0a78b]/15 blur-xl" />
+              <div className="blob-1 absolute w-36 h-36 sm:w-48 sm:h-48 rounded-full bg-[radial-gradient(circle,rgba(208,167,139,0.65)_0%,transparent_70%)] blur-md" />
+              <div className="blob-2 absolute w-32 h-32 sm:w-44 sm:h-44 rounded-full bg-[radial-gradient(circle,rgba(171,123,96,0.45)_0%,transparent_70%)] blur-md" />
+              <div className="blob-3 absolute w-28 h-28 sm:w-40 sm:h-40 rounded-full bg-[radial-gradient(circle,rgba(235,208,188,0.55)_0%,transparent_70%)] blur-md" />
+              <div className="absolute w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-[#d0a78b]/15 blur-xl" />
             </div>
 
             <div className="absolute inset-0 z-20 rounded-full flex items-center justify-center overflow-hidden">
               <canvas
                 ref={cloudCanvasRef}
                 className="absolute inset-0 w-full h-full pointer-events-none"
-                width={208}
-                height={208}
+                width={160}
+                height={160}
               />
               {connecting ? (
-                <Loader2 className="w-10 h-10 animate-spin text-[#d0a78b] z-10" />
+                <Loader2 className="w-8 h-8 sm:w-10 sm:h-10 animate-spin text-[#d0a78b] z-10" />
               ) : isActive ? null : null}
             </div>
           </button>
         </div>
 
-        <div className="w-full max-w-xl px-8 flex flex-col items-center justify-center text-center h-[80px] gap-1 transition-opacity duration-700">
+        <div className="w-full max-w-xl px-2 sm:px-8 flex flex-col items-center justify-center text-center min-h-[60px] sm:min-h-[80px] gap-1 transition-opacity duration-700 pb-4">
           <AnimatePresence>
             {userTranscript && (
               <KaraokeTranscript
@@ -2062,44 +2059,44 @@ ${historyContext}
         </div>
       </main>
 
-      <footer className="sticky bottom-0 w-full h-[92px] bg-[#161312]/95 backdrop-blur-md border-t border-zinc-800/60 z-20 px-6 box-border select-none">
+      <footer className="sticky bottom-0 w-full h-[72px] sm:h-[92px] bg-[#161312]/95 backdrop-blur-md border-t border-zinc-800/60 z-20 px-4 sm:px-6 box-border select-none shrink-0">
         <div className="relative w-full h-full flex items-center justify-between">
 
           <button
             onClick={() => setShowChatPage(true)}
-            className="absolute left-[50px] flex flex-col items-center justify-center text-zinc-400 hover:text-[#d0a78b] transition-colors duration-300"
+            className="absolute left-4 sm:left-[50px] flex flex-col items-center justify-center text-zinc-400 hover:text-[#d0a78b] transition-colors duration-300"
           >
-            <MessageSquare className="w-5 h-5 mb-1" />
-            <span className="text-xs font-medium">Chat</span>
+            <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 mb-1" />
+            <span className="text-[10px] sm:text-xs font-medium">Chat</span>
           </button>
 
           <button
             onClick={isActive ? stopSession : startSession}
             disabled={connecting}
-            className={`absolute left-1/2 -translate-x-1/2 bottom-[55px] w-20 h-20 rounded-full flex flex-col items-center justify-center shadow-xl transition-all duration-300 border-4 border-[#161312] z-30 ${
+            className={`absolute left-1/2 -translate-x-1/2 bottom-[40px] sm:bottom-[55px] w-14 h-14 sm:w-20 sm:h-20 rounded-full flex flex-col items-center justify-center shadow-xl transition-all duration-300 border-4 border-[#161312] z-30 ${
               isActive
                 ? 'bg-zinc-900 text-[#d0a78b] border-2 border-[#d0a78b]/40'
                 : 'bg-[#d0a78b] text-black hover:bg-[#ebd0bc] shadow-[#d0a78b]/20'
             }`}
           >
             {connecting ? (
-              <Loader2 className="w-7 h-7 animate-spin" />
+              <Loader2 className="w-5 h-5 sm:w-7 sm:h-7 animate-spin" />
             ) : isActive ? (
               <div className="absolute inset-0 rounded-full overflow-hidden flex items-center justify-center">
                 <canvas
                   ref={miniCloudCanvasRef}
                   className="absolute inset-0 w-full h-full pointer-events-none"
-                  width={80}
-                  height={80}
+                  width={56}
+                  height={56}
                 />
-                <span className="text-[9px] font-extrabold uppercase tracking-widest z-10 text-[#d0a78b]">
+                <span className="text-[7px] sm:text-[9px] font-extrabold uppercase tracking-widest z-10 text-[#d0a78b]">
                   Stop
                 </span>
               </div>
             ) : (
               <>
-                <Power className="w-7 h-7" />
-                <span className="text-[9px] font-extrabold uppercase tracking-widest mt-1">
+                <Power className="w-5 h-5 sm:w-7 sm:h-7" />
+                <span className="text-[7px] sm:text-[9px] font-extrabold uppercase tracking-widest mt-0.5 sm:mt-1">
                   Start
                 </span>
               </>
@@ -2108,10 +2105,10 @@ ${historyContext}
 
           <button
             onClick={() => setShowVideoPage(true)}
-            className="absolute right-[50px] flex flex-col items-center justify-center text-zinc-400 hover:text-[#d0a78b] transition-colors duration-300"
+            className="absolute right-4 sm:right-[50px] flex flex-col items-center justify-center text-zinc-400 hover:text-[#d0a78b] transition-colors duration-300"
           >
-            <Video className="w-5 h-5 mb-1" />
-            <span className="text-xs font-medium">Video</span>
+            <Video className="w-4 h-4 sm:w-5 sm:h-5 mb-1" />
+            <span className="text-[10px] sm:text-xs font-medium">Video</span>
           </button>
         </div>
       </footer>

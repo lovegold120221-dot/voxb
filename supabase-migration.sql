@@ -14,7 +14,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(user_id, session_id)
 
 CREATE TABLE IF NOT EXISTS user_settings (
   user_id TEXT PRIMARY KEY,
-  persona_name TEXT DEFAULT 'Eburon AI Beatrice',
+  persona_name TEXT DEFAULT 'Beatrice',
   custom_prompt TEXT DEFAULT '',
   selected_voice TEXT DEFAULT 'Aoede',
   context_size INT DEFAULT 20,

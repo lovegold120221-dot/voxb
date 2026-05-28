@@ -111,7 +111,7 @@ export function ChatPage({
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 bg-[#161312] flex flex-col h-[100dvh]"
     >
-      <header className="sticky top-0 w-full bg-[#161312]/95 backdrop-blur-md border-b border-zinc-800/60 px-4 py-3 flex items-center justify-between z-10 shrink-0">
+      <header className="sticky top-0 w-full bg-[#161312]/95 backdrop-blur-md border-b border-zinc-800/60 px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between z-10 shrink-0">
         <div className="flex items-center gap-2">
           {!showSidebar && (
             <button
