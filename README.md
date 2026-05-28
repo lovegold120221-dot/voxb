@@ -222,6 +222,17 @@ flowchart TB
 | `src/components/ComputerPage.tsx` | Document preview + download |
 | `src/components/KaraokeTranscript.tsx` | Word-by-word animated transcript |
 | `src/index.css` | Tailwind v4 + custom animations |
+| `public/contract-sample.html` | Executive Employment Agreement reference |
+| `public/invoice-template.html` | Invoice with line items & tax calc |
+| `public/letter-template.html` | Formal business letter |
+| `public/proposal-template.html` | Business proposal |
+| `public/minutes-template.html` | Meeting minutes |
+| `public/memo-template.html` | Internal memo |
+| `public/purchase-order-template.html` | Purchase order |
+| `public/receipt-template.html` | Payment receipt |
+| `public/resignation-template.html` | Resignation letter |
+| `public/nda-template.html` | Non-disclosure agreement |
+| `public/certificate-template.html` | Certificate of completion |
 | `supabase-migration.sql` | Required Supabase schema setup |
 
 ## Supabase Setup
@@ -243,3 +254,9 @@ npm run dev          # Dev server, port 3000, binds 0.0.0.0
 npm run build        # Production build via Vite
 npm run lint         # Typecheck only (tsc --noEmit)
 ```
+
+## Document Generation
+
+Documents (invoices, letters, contracts, proposals, etc.) are generated directly by the Gemini Live model. When the user requests a document, the model produces a complete self-contained HTML page with embedded CSS and JS as the `content` parameter of the `create_document` tool. The app displays it instantly in the workspace — no external server, no polling.
+
+11 reference templates in `public/` (see table above) teach the model the structural pattern for each document type. The model adapts the template to the user's specific requirements on every request.

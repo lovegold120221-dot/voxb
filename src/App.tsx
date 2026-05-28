@@ -768,11 +768,9 @@ function MaximusAgent({
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
   const audioRecorderRef = useRef<AudioRecorder | null>(null);
   const cloudCanvasRef = useRef<HTMLCanvasElement>(null);
-  const miniCloudCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const waveformCanvasRef = useRef<HTMLCanvasElement>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
   const videoIntervalRef = useRef<any>(null);
 
@@ -1533,7 +1531,21 @@ GOOGLE SERVICES PERMISSION RULE:
 You can access the user's Google Calendar, Gmail, Tasks, Drive, and YouTube. However, you MUST NEVER call any Google API tool automatically. If you want to check the user's calendar, events, holidays, emails, tasks, or any Google data, you MUST first ask the user casually in conversation. Only call a Google tool after they explicitly say yes or tell you to go ahead. This is a strict rule — do not auto-fetch anything.
 
 DOCUMENT CREATION RULE:
-When the user asks you to create a document (contract, report, letter, invoice, proposal, form, or any written material), you MUST generate the complete file as the \`content\` parameter of the \`create_document\` tool call. The content must be a fully self-contained standalone page with all HTML, CSS, and JavaScript merged into a single file that works as a preview in the browser. Use the contract-sample.html in the public folder as your structural template — it uses serif fonts for body text, sans-serif for UI panels, CSS variables for theming, a responsive two-column layout (editor + preview), A4-style paper styling, dynamic data binding, and a signature canvas. Follow that same pattern for all documents: proper <!DOCTYPE html>, embedded <style>, semantic structure, responsive design, and print styles. When you present it to the user, use natural language: call it a "document", "preview", "draft", or "file" — never say "HTML". Tell the user something like "I've put together a draft for you, take a look" or "Here's the document in the workspace." Never use technical terms like "HTML" when talking to the user about their document.
+When the user asks you to create a document (contract, report, letter, invoice, proposal, form, or any written material), you MUST generate the complete file as the \`content\` parameter of the \`create_document\` tool call. The content must be a fully self-contained standalone page with all HTML, CSS, and JavaScript merged into a single file that works as a preview in the browser. Use the following 11 template files in the public folder as structural references — they demonstrate the correct pattern for each document type:
+
+1. contract-sample.html — Executive employment agreement with serif body, two-column editor+preview layout, A4 paper, signature canvas, dynamic data binding, print styles
+2. invoice-template.html — Invoice with line items, quantity/price/tax auto-calculation, bill-from/bill-to sections
+3. letter-template.html — Formal business letter with proper date, recipient, subject line, body, and signature block
+4. proposal-template.html — Business proposal with executive summary, scope, pricing table, timeline, terms
+5. minutes-template.html — Meeting minutes with agenda items, key decisions, action item table, attendee list
+6. memo-template.html — Internal company memorandum with To/From/Date/Subject header
+7. purchase-order-template.html — Purchase order with supplier info, line items, VAT calculation, delivery terms
+8. receipt-template.html — Payment receipt with paid-in-full confirmation, customer details
+9. resignation-template.html — Formal resignation letter with notice period, last working day
+10. nda-template.html — Mutual non-disclosure agreement with purpose, obligations, term, governing law, dual signature
+11. certificate-template.html — Certificate of completion with gold border, seal, recipient name, issuer signature
+
+Follow the same structural pattern for all documents: proper <!DOCTYPE html>, embedded <style>, semantic structure, responsive design (works on mobile), print @media styles, and live preview if applicable. When you present it to the user, use natural language: call it a "document", "preview", "draft", or "file" — never say "HTML". Tell the user something like "I've put together a draft for you, take a look" or "Here's the document in the workspace." Never use technical terms like "HTML" when talking to the user about their document.
 
 ${customPrompt || ""}
 
