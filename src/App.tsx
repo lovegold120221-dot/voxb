@@ -689,6 +689,7 @@ function MaximusAgent({
 
   const [tasks, setTasks] = useState<ActionTask[]>([]);
   const [historyContext, setHistoryContext] = useState<string>("");
+  const historyContextRef = useRef<string>("");
   const [userTranscript, setUserTranscript] = useState<string>('');
   const [modelTranscript, setModelTranscript] = useState<string>('');
 
@@ -900,7 +901,7 @@ function MaximusAgent({
       );
       await new Promise(r => setTimeout(r, 1200));
 
-      const { taskId, task } = await createSandboxTask(intent.type, intent.label, text, user?.email || undefined, user?.uid || undefined);
+      const { taskId, task } = await createSandboxTask(intent.type, intent.label, text, user?.email || undefined, user?.uid || undefined, historyContextRef.current);
       activeTaskIdRef.current = taskId;
       setComputerTask(task);
       setComputerOutput(null);
@@ -1126,8 +1127,7 @@ function MaximusAgent({
       setMessages(messageList);
 
       if (msgs.length > 0) {
-        const contextMsgs = msgs.slice(-contextSize);
-        let context = "Previous conversation for context memory:\n" + contextMsgs.join("\n");
+        let context = "Previous conversation for context memory:\n" + msgs.join("\n");
 
         const pendingPatterns = [
           /\b(create|make|build|generate|write|compose|fix|check|run|deploy|zip|convert|summarize)\b/i,
@@ -1162,8 +1162,10 @@ function MaximusAgent({
         }
 
         setHistoryContext(context);
+        historyContextRef.current = context;
       } else {
         setHistoryContext("");
+        historyContextRef.current = "";
       }
 
       if (messageList.length > 0 && !selectedSessionId) {

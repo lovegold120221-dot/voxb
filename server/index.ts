@@ -51,7 +51,7 @@ app.get('/api/ollama/status', async (_req, res) => {
 
 app.post('/api/tasks', async (req, res) => {
   try {
-    const { type, label, prompt, userRequest, userEmail, userId } = req.body as TaskRequest;
+    const { type, label, prompt, userRequest, userEmail, userId, context } = req.body as TaskRequest & { context?: string };
 
     if (!type || !label) {
       res.status(400).json({ error: 'Missing task type or label' });
@@ -73,7 +73,11 @@ app.post('/api/tasks', async (req, res) => {
       downloadUrl: `/sandbox/tasks/${taskId}/output/`,
     });
 
-    runTask(taskId, type, prompt || userRequest || label, userEmail, userId);
+    const fullPrompt = context
+      ? `Conversation history:\n${context}\n\nUser request: ${prompt || userRequest || label}`
+      : (prompt || userRequest || label);
+
+    runTask(taskId, type, fullPrompt, userEmail, userId);
   } catch (err) {
     console.error('Task creation error:', err);
     res.status(500).json({ error: 'Internal error creating task' });
