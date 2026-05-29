@@ -3093,13 +3093,11 @@ ${historyContext}
 
         <div className="relative flex items-center justify-center w-full h-[240px] sm:h-[320px]">
           <div
-            className={`absolute w-64 h-64 sm:w-80 sm:h-80 rounded-full blur-3xl transition-none`}
+            className={`absolute w-64 h-64 sm:w-80 sm:h-80 rounded-full blur-3xl transition-none orb-glow`}
             style={{
-              background: isActive
-                ? `radial-gradient(circle, rgba(208,167,139,${0.12 + breathLevel * 0.38}) 0%, transparent 70%)`
-                : 'radial-gradient(circle, rgba(208,167,139,0.06) 0%, transparent 70%)',
-              transform: `scale(${isActive ? 1 + breathLevel * 0.3 : 1})`,
-            }}
+              ['--glow-alpha' as string]: isActive ? 0.12 + breathLevel * 0.38 : 0.06,
+              ['--glow-scale' as string]: isActive ? 1 + breathLevel * 0.3 : 1,
+            } as React.CSSProperties}
           />
 
           <button
@@ -3416,7 +3414,9 @@ ${historyContext}
                     </div>
                     <button
                       onClick={() => setAmbientEnabled(v => !v)}
-                      aria-pressed={ambientEnabled}
+                      aria-pressed={ambientEnabled ? 'true' : 'false'}
+                      aria-label="Toggle ambient sound"
+                      title="Toggle ambient sound"
                       className={`w-11 h-6 rounded-full transition-all ${ambientEnabled ? 'bg-[#d0a78b]' : 'bg-zinc-700'}`}
                     >
                       <span className={`block w-4 h-4 rounded-full bg-white transition-all mt-1 ${ambientEnabled ? 'ml-6' : 'ml-1'}`} />
@@ -3536,6 +3536,9 @@ ${historyContext}
                           <span className="text-xs text-zinc-400">{p.label}</span>
                           <button
                             onClick={() => toggleWaPermission(p.key)}
+                            aria-pressed={waPermissions[p.key] ? 'true' : 'false'}
+                            aria-label={`Toggle ${p.label}`}
+                            title={`Toggle ${p.label}`}
                             className={`w-9 h-5 rounded-full transition-all ${waPermissions[p.key] ? 'bg-[#d0a78b]' : 'bg-zinc-700'}`}
                           >
                             <div className={`w-3.5 h-3.5 rounded-full bg-white transition-all mt-[3px] ${waPermissions[p.key] ? 'ml-[18px]' : 'ml-[3px]'}`} />

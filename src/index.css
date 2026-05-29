@@ -33,3 +33,7 @@ html, body {
   -webkit-mask-image: linear-gradient(to right, transparent, black 15%, black 85%, transparent);
   mask-image: linear-gradient(to right, transparent, black 15%, black 85%, transparent);
 }
+.orb-glow {
+  background: radial-gradient(circle, rgba(208, 167, 139, var(--glow-alpha, 0.06)) 0%, transparent 70%);
+  transform: scale(var(--glow-scale, 1));
+}

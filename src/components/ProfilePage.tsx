@@ -348,7 +348,12 @@ export function ProfilePage({ onClose }: ProfilePageProps) {
                 <span key={d} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 text-xs text-zinc-300">
                   <Link className="w-3 h-3 text-zinc-500" />
                   {d}
-                  <button onClick={() => removeDomain(d)} className="text-zinc-600 hover:text-red-400 ml-0.5">
+                  <button
+                    onClick={() => removeDomain(d)}
+                    className="text-zinc-600 hover:text-red-400 ml-0.5"
+                    aria-label={`Remove domain ${d}`}
+                    title={`Remove domain ${d}`}
+                  >
                     <X className="w-3 h-3" />
                   </button>
                 </span>

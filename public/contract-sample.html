@@ -334,6 +334,37 @@
                 font-weight: normal;
             }
         }
+
+        .jurisdiction-subtitle {
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+
+        .paragraph-spacing {
+            margin-top: 8px;
+        }
+
+        .benefits-list {
+            margin-left: 25px;
+            margin-top: 5px;
+        }
+
+        .sig-placeholder {
+            color: #888;
+            font-size: 0.8rem;
+        }
+
+        .sig-image {
+            display: none;
+        }
+
+        .sig-image.is-visible {
+            display: block;
+        }
+
+        .sig-placeholder.is-hidden {
+            display: none;
+        }
     </style>
 </head>
 
@@ -403,7 +434,7 @@
             <div class="contract-header">
                 <h1>Executive Employment Agreement</h1>
                 <div class="subtitle">Chief Executive Officer (CEO) Grade</div>
-                <div style="font-size: 0.9rem; margin-top: 5px;">Belgium Jurisdiction</div>
+                <div class="jurisdiction-subtitle">Belgium Jurisdiction</div>
             </div>
 
             <div class="divider"></div>
@@ -457,7 +488,7 @@
                 The Executive's primary place of work will be the Company's registered office, currently located in
                 Brussels. However, the nature of the duties requires regular travel within Belgium and internationally.
             </p>
-            <p style="margin-top: 8px;">
+            <p class="paragraph-spacing">
                 The Parties acknowledge that the Executive qualifies as "person invested with a leading position or a
                 position of trust" (*personne investie d'un poste de direction ou de confiance / personen bekleed met
                 een leidinggevende functie of een vertrouwenspost*) within the meaning of the Belgian Act of 16 March
@@ -469,7 +500,7 @@
             <p>
                 As consideration for the performance of their duties, the Executive shall receive:
             </p>
-            <ul style="margin-left: 25px; margin-top: 5px;">
+            <ul class="benefits-list">
                 <li><strong>Base Salary:</strong> A gross monthly base salary of <span id="p-salary"
                         class="highlight">€18,500</span>, payable in accordance with the standard payroll practices in
                     Belgium (including 13.92-month structural standards if applicable).</li>
@@ -521,7 +552,7 @@
                 <div class="signature-box">
                     <p>For and on behalf of <strong><span id="p-companyName-sig">Ariolas BV</span></strong></p>
                     <div class="sig-space">
-                        <em style="color:#888; font-size: 0.8rem;">[Board representative signature]</em>
+                        <em class="sig-placeholder">[Board representative signature]</em>
                     </div>
                     <p>Name: Representative of the Board</p>
                     <p>Title: Chairperson of the Board</p>
@@ -531,8 +562,8 @@
                 <div class="signature-box">
                     <p>The Executive</p>
                     <div class="sig-space">
-                        <img id="sigImage" src="" alt="" style="display:none;" />
-                        <span id="sigPlaceholder" style="color:#888; font-size: 0.8rem;">[Sign in editor panel]</span>
+                        <img id="sigImage" class="sig-image" src="" alt="" />
+                        <span id="sigPlaceholder" class="sig-placeholder">[Sign in editor panel]</span>
                     </div>
                     <p>Name: <strong><span id="p-ceoName-sig">Joe Lernout</span></strong></p>
                     <p>Title: Chief Executive Officer</p>
@@ -654,8 +685,8 @@
 
         function clearSig() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            document.getElementById('sigImage').style.display = 'none';
-            document.getElementById('sigPlaceholder').style.display = 'block';
+            document.getElementById('sigImage').classList.remove('is-visible');
+            document.getElementById('sigPlaceholder').classList.remove('is-hidden');
         }
 
         function updateContractSignature() {
@@ -665,8 +696,8 @@
             const placeholder = document.getElementById('sigPlaceholder');
 
             sigImg.src = dataUrl;
-            sigImg.style.display = 'block';
-            placeholder.style.display = 'none';
+            sigImg.classList.add('is-visible');
+            placeholder.classList.add('is-hidden');
         }
     </script>
 </body>
